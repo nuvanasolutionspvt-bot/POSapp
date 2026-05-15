@@ -1,0 +1,67 @@
+from django.urls import path
+from rest_framework.routers import DefaultRouter
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from .views import (
+    BillViewSet,
+    BusinessProfileViewSet,
+    CategoryViewSet,
+    CustomerViewSet,
+    FirebaseLoginView,
+    OTPRequestView,
+    OTPVerifyView,
+    ProductViewSet,
+    RegisterView,
+    app_subscription,
+    business_subscription_save,
+    create_subscription_razorpay_order,
+    dashboard_summary,
+    health_check,
+    reports_download,
+    reports_summary,
+    subscription_admin_panel,
+    subscription_admin_logout,
+    subscription_owner_login,
+    subscription_plans,
+    subscription_plan_create,
+    verify_subscription_razorpay_payment,
+)
+
+router = DefaultRouter()
+router.register("business-profiles", BusinessProfileViewSet, basename="business-profile")
+router.register("categories", CategoryViewSet, basename="category")
+router.register("products", ProductViewSet, basename="product")
+router.register("customers", CustomerViewSet, basename="customer")
+router.register("bills", BillViewSet, basename="bill")
+
+urlpatterns = [
+    path("health/", health_check, name="health-check"),
+    path("auth/register/", RegisterView.as_view(), name="auth-register"),
+    path("auth/request-otp/", OTPRequestView.as_view(), name="auth-request-otp"),
+    path("auth/verify-otp/", OTPVerifyView.as_view(), name="auth-verify-otp"),
+    path("auth/firebase-login/", FirebaseLoginView.as_view(), name="auth-firebase-login"),
+    path("auth/login/", TokenObtainPairView.as_view(), name="token-obtain-pair"),
+    path("auth/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
+    path("dashboard/summary/", dashboard_summary, name="dashboard-summary"),
+    path("subscription/plans/", subscription_plans, name="subscription-plans"),
+    path("subscription/current/", app_subscription, name="app-subscription"),
+    path(
+        "subscription/razorpay/create-order/",
+        create_subscription_razorpay_order,
+        name="subscription-razorpay-create-order",
+    ),
+    path(
+        "subscription/razorpay/verify/",
+        verify_subscription_razorpay_payment,
+        name="subscription-razorpay-verify",
+    ),
+    path("reports/summary/", reports_summary, name="reports-summary"),
+    path("reports/download/", reports_download, name="reports-download"),
+    path("subscription-admin/login/", subscription_owner_login, name="subscription-owner-login"),
+    path("subscription-admin/", subscription_admin_panel, name="subscription-admin-panel"),
+    path("subscription-admin/logout/", subscription_admin_logout, name="subscription-admin-logout"),
+    path("subscription-admin/plans/", subscription_plan_create, name="subscription-plan-create"),
+    path("subscription-admin/subscriptions/", business_subscription_save, name="business-subscription-save"),
+]
+
+urlpatterns += router.urls

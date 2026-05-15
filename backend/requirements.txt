@@ -1,0 +1,8 @@
+django
+djangorestframework
+django-cors-headers
+djangorestframework-simplejwt
+drf-yasg
+pillow
+PyMySQL
+firebase-admin

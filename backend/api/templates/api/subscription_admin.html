@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NuvaBill Subscription Dashboard</title>
+  <style>
+    :root {
+      --primary: #02066F;
+      --primary-soft: #eef0ff;
+      --bg: #f5f6fb;
+      --card: #ffffff;
+      --line: #d9deea;
+      --text: #111827;
+      --muted: #667085;
+      --success: #067647;
+      --warning: #b54708;
+      --danger: #b42318;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--primary);
+      color: #fff;
+      padding: 24px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 26px;
+      border-bottom: 1px solid rgba(255,255,255,.18);
+      margin-bottom: 22px;
+    }
+
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: #fff;
+      color: var(--primary);
+      font-weight: 900;
+    }
+
+    .brand-title { font-size: 18px; font-weight: 800; }
+    .brand-subtitle { font-size: 12px; color: rgba(255,255,255,.72); margin-top: 2px; }
+
+    .nav-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: rgba(255,255,255,.58);
+      margin: 18px 10px 8px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: rgba(255,255,255,.82);
+      padding: 12px 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .nav-item.active,
+    .nav-item:hover {
+      background: rgba(255,255,255,.14);
+      color: #fff;
+    }
+
+    .nav-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .main {
+      padding: 28px;
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 28px; letter-spacing: 0; color: var(--text); }
+    .muted { color: var(--muted); font-size: 13px; margin-top: 5px; }
+
+    .date-pill {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: var(--primary);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .metric, .panel, .plan-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 10px 24px rgba(17,24,39,.06);
+    }
+
+    .metric { padding: 18px; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+    .metric strong { display: block; color: var(--primary); font-size: 32px; margin-top: 8px; }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .panel { overflow: hidden; }
+    .panel-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .panel-header h2 { font-size: 18px; }
+    .panel-body { padding: 18px; }
+
+    .plans-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .plan-card { padding: 16px; }
+    .plan-name { font-size: 17px; font-weight: 900; }
+    .plan-code { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .plan-price { color: var(--primary); font-size: 22px; font-weight: 900; margin-top: 14px; }
+    .plan-desc { color: var(--muted); font-size: 13px; line-height: 19px; margin-top: 8px; min-height: 42px; }
+    .plan-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 11px;
+      font-weight: 800;
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+
+    form { display: grid; gap: 12px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    label { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #344054; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 11px 12px;
+      font: inherit;
+      background: #fff;
+      color: var(--text);
+    }
+    textarea { min-height: 74px; resize: vertical; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+    .checkbox-row input { width: auto; }
+    button {
+      border: 0;
+      border-radius: 10px;
+      background: var(--primary);
+      color: #fff;
+      padding: 12px 14px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .button-secondary {
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td {
+      text-align: left;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      background: #fbfcff;
+    }
+    tr:last-child td { border-bottom: 0; }
+
+    .business-name { font-weight: 900; color: var(--text); }
+    .status {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 11px;
+      font-weight: 900;
+      background: #eef2ff;
+      color: var(--primary);
+      text-transform: uppercase;
+    }
+    .status.expired, .status.cancelled { background: #fee4e2; color: var(--danger); }
+    .status.past_due { background: #fef0c7; color: var(--warning); }
+    .status.active { background: #dcfae6; color: var(--success); }
+    .status.trial { background: #eef4ff; color: var(--primary); }
+    .days-negative { color: var(--danger); font-weight: 900; }
+    .days-ok { color: var(--success); font-weight: 900; }
+    .empty { padding: 22px; color: var(--muted); text-align: center; }
+
+    details summary {
+      cursor: pointer;
+      color: var(--primary);
+      font-weight: 900;
+      margin-bottom: 12px;
+    }
+
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .metrics, .content-grid, .plans-grid { grid-template-columns: 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">NB</div>
+        <div>
+          <div class="brand-title">NuvaBill</div>
+          <div class="brand-subtitle">Subscription Control</div>
+        </div>
+      </div>
+
+      <div class="nav-title">Dashboard</div>
+      <a class="nav-item active" href="#overview"><span class="nav-dot"></span> Overview</a>
+      <a class="nav-item" href="#plans"><span class="nav-dot"></span> Plans</a>
+      <a class="nav-item" href="#assign"><span class="nav-dot"></span> Assign Subscription</a>
+      <a class="nav-item" href="#subscriptions"><span class="nav-dot"></span> Businesses</a>
+
+      <div class="nav-title">App Flow</div>
+      <a class="nav-item" href="/api/subscription-admin/"><span class="nav-dot"></span> Refresh Panel</a>
+      <a class="nav-item" href="/subscription-admin/logout/"><span class="nav-dot"></span> Logout</a>
+    </aside>
+
+    <main class="main">
+      <header class="topbar" id="overview">
+        <div>
+          <h1>Subscription Dashboard</h1>
+          <p class="muted">Subscriptions created from the mobile app are tracked here with plan, status, and validity.</p>
+        </div>
+        <div class="date-pill">{{ today }}</div>
+      </header>
+
+      <section class="metrics">
+        <div class="metric"><span>Total Businesses</span><strong>{{ metrics.total_businesses }}</strong></div>
+        <div class="metric"><span>Active</span><strong>{{ metrics.active }}</strong></div>
+        <div class="metric"><span>Trial</span><strong>{{ metrics.trial }}</strong></div>
+        <div class="metric"><span>Expired</span><strong>{{ metrics.expired }}</strong></div>
+      </section>
+
+      <section class="panel" id="plans" style="margin-bottom:18px;">
+        <div class="panel-header">
+          <div>
+            <h2>Plans Shown In App</h2>
+            <p class="muted">These are the plans users select from Settings > Manage Subscription.</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="plans-grid">
+            {% for plan in plans %}
+              {% if plan.is_active %}
+                <div class="plan-card">
+                  <div class="plan-name">{{ plan.name }}</div>
+                  <div class="plan-code">{{ plan.code }}</div>
+                  <div class="plan-price">Rs. {{ plan.price }}</div>
+                  <div class="plan-desc">{{ plan.description }}</div>
+                  <div class="plan-meta">
+                    <span class="chip">{{ plan.billing_cycle }}</span>
+                    <span class="chip">{{ plan.max_users }} users</span>
+                    <span class="chip">{{ plan.max_products }} products</span>
+                  </div>
+                </div>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+
+      <section class="content-grid">
+        <div class="panel" id="subscriptions">
+          <div class="panel-header">
+            <div>
+              <h2>Business Subscriptions</h2>
+              <p class="muted">{{ subscriptions|length }} subscription records</p>
+            </div>
+          </div>
+          {% if subscriptions %}
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Business</th>
+                    <th>Plan</th>
+                    <th>Status</th>
+                    <th>Validity</th>
+                    <th>Days</th>
+                    <th>Manage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for subscription in subscriptions %}
+                    <tr>
+                      <td>
+                        <div class="business-name">{{ subscription.business.name }}</div>
+                        <div class="muted">{{ subscription.business.phone|default:"No phone" }}</div>
+                      </td>
+                      <td>
+                        <strong>{{ subscription.plan.name }}</strong>
+                        <div class="muted">Rs. {{ subscription.plan.price }} / {{ subscription.plan.billing_cycle }}</div>
+                        <div class="muted">{{ subscription.plan.description }}</div>
+                      </td>
+                      <td><span class="status {{ subscription.status }}">{{ subscription.get_status_display }}</span></td>
+                      <td>{{ subscription.starts_at }}<div class="muted">to {{ subscription.ends_at }}</div></td>
+                      <td>
+                        {% if subscription.days_remaining < 0 %}
+                          <span class="days-negative">{{ subscription.days_remaining }} days</span>
+                        {% else %}
+                          <span class="days-ok">{{ subscription.days_remaining }} days</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        <details>
+                          <summary>Edit</summary>
+                          <form method="post" action="{% url 'business-subscription-save' %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="subscription_id" value="{{ subscription.id }}">
+                            <input type="hidden" name="business" value="{{ subscription.business.id }}">
+                            <div class="form-grid">
+                              <label>Plan
+                                <select name="plan">
+                                  {% for plan in plans %}
+                                    <option value="{{ plan.id }}" {% if plan.id == subscription.plan.id %}selected{% endif %}>{{ plan.name }}</option>
+                                  {% endfor %}
+                                </select>
+                              </label>
+                              <label>Status
+                                <select name="status">
+                                  {% for value,label in statuses %}
+                                    <option value="{{ value }}" {% if value == subscription.status %}selected{% endif %}>{{ label }}</option>
+                                  {% endfor %}
+                                </select>
+                              </label>
+                              <label>Starts <input name="starts_at" type="date" value="{{ subscription.starts_at|date:'Y-m-d' }}"></label>
+                              <label>Ends <input name="ends_at" type="date" value="{{ subscription.ends_at|date:'Y-m-d' }}"></label>
+                              <label>Trial ends <input name="trial_ends_at" type="date" value="{{ subscription.trial_ends_at|date:'Y-m-d' }}"></label>
+                              <label>Seats <input name="seats" type="number" min="1" value="{{ subscription.seats }}"></label>
+                            </div>
+                            <label>Notes <textarea name="notes">{{ subscription.notes }}</textarea></label>
+                            <button type="submit">Save changes</button>
+                          </form>
+                        </details>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="empty">No subscriptions yet. Create one from the mobile app Subscription screen.</div>
+          {% endif %}
+        </div>
+
+        <div class="panel" id="assign">
+          <div class="panel-header">
+            <div>
+              <h2>Manual Assignment</h2>
+              <p class="muted">Use this only when you need to fix or add a business manually.</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <form method="post" action="{% url 'business-subscription-save' %}">
+              {% csrf_token %}
+              <label>Business
+                <select name="business" required>
+                  {% for business in businesses_without_subscription %}
+                    <option value="{{ business.id }}">{{ business.name }} - {{ business.phone }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <div class="form-grid">
+                <label>Plan
+                  <select name="plan" required>
+                    {% for plan in plans %}
+                      <option value="{{ plan.id }}">{{ plan.name }} - Rs. {{ plan.price }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>Status
+                  <select name="status">
+                    {% for value,label in statuses %}
+                      <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>Starts at <input name="starts_at" type="date" value="{{ today|date:'Y-m-d' }}"></label>
+                <label>Ends at <input name="ends_at" type="date" required></label>
+                <label>Trial ends at <input name="trial_ends_at" type="date"></label>
+                <label>Seats <input name="seats" type="number" min="1" value="1"></label>
+              </div>
+              <label>Notes <textarea name="notes"></textarea></label>
+              <button type="submit">Assign subscription</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Create Extra Plan</h2>
+            <p class="muted">Optional. The app currently displays only the three fixed plans requested.</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <form method="post" action="{% url 'subscription-plan-create' %}">
+            {% csrf_token %}
+            <div class="form-grid">
+              <label>Plan name <input name="name" placeholder="Custom Plan" required></label>
+              <label>Code <input name="code" placeholder="custom_plan" required></label>
+              <label>Price <input name="price" type="number" min="0" step="0.01" value="0"></label>
+              <label>Billing cycle
+                <select name="billing_cycle">
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+              </label>
+              <label>Max users <input name="max_users" type="number" min="1" value="1"></label>
+              <label>Max products <input name="max_products" type="number" min="1" value="100"></label>
+            </div>
+            <label>Description <textarea name="description" placeholder="What this plan includes"></textarea></label>
+            <label class="checkbox-row"><input type="checkbox" name="is_active" checked> Active plan</label>
+            <button class="button-secondary" type="submit">Create extra plan</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

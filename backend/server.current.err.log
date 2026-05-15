@@ -1,0 +1,18 @@
+[13/May/2026 16:51:47] "GET /api/health/ HTTP/1.1" 200 15
+[13/May/2026 16:51:47,239] - Broken pipe from ('127.0.0.1', 62029)
+E:\POSapp\backend\venv\Lib\site-packages\jwt\api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 27 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+  return self._jws.encode(
+[13/May/2026 16:56:54] "POST /api/auth/firebase-login/ HTTP/1.1" 200 751
+E:\POSapp\backend\venv\Lib\site-packages\jwt\api_jwt.py:365: InsecureKeyLengthWarning: The HMAC key is 27 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+  decoded = self.decode_complete(
+[13/May/2026 16:56:55] "GET /api/bills/ HTTP/1.1" 200 52
+[13/May/2026 16:56:55] "GET /api/dashboard/summary/ HTTP/1.1" 200 119
+[13/May/2026 16:57:07] "GET /api/categories/ HTTP/1.1" 200 52
+[13/May/2026 16:57:07] "GET /api/products/ HTTP/1.1" 200 52
+[13/May/2026 16:57:09] "GET /api/customers/ HTTP/1.1" 200 52
+[13/May/2026 16:57:11] "GET /api/categories/ HTTP/1.1" 200 52
+[13/May/2026 16:57:11] "GET /api/products/ HTTP/1.1" 200 52
+[13/May/2026 16:57:12] "GET /api/bills/ HTTP/1.1" 200 52
+[13/May/2026 16:57:12] "GET /api/dashboard/summary/ HTTP/1.1" 200 119
+[13/May/2026 16:57:16] "GET /api/bills/ HTTP/1.1" 200 52
+[13/May/2026 16:57:16] "GET /api/dashboard/summary/ HTTP/1.1" 200 119
