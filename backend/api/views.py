@@ -923,6 +923,118 @@ def health_check(request):
     return Response({"status": "ok"})
 
 
+LEGAL_DOCUMENTS = {
+    "terms": {
+        "title": "Terms and Conditions",
+        "version": "1.0",
+        "effective_date": "2026-05-18",
+        "sections": [
+            {
+                "heading": "Use of NuvaBill",
+                "body": "NuvaBill is provided for point-of-sale billing, product, customer, report, and subscription management. You are responsible for the accuracy of business, tax, product, customer, and billing information entered in the app.",
+            },
+            {
+                "heading": "Account Access",
+                "body": "You must keep your login credentials and registered mobile number secure. Activity performed from your account may be treated as activity authorized by you.",
+            },
+            {
+                "heading": "Payments and Subscriptions",
+                "body": "Paid subscription plans, trial periods, renewal dates, product limits, and user limits are shown in the app or admin panel. Payment gateway processing is handled by the configured payment provider.",
+            },
+            {
+                "heading": "Service Availability",
+                "body": "We aim to keep the service available, but access may be interrupted because of maintenance, network issues, infrastructure outages, or third-party service failures.",
+            },
+            {
+                "heading": "Data Responsibility",
+                "body": "You are responsible for reviewing generated bills, reports, GST details, and customer records before using them for business, accounting, or compliance purposes.",
+            },
+        ],
+    },
+    "privacy": {
+        "title": "Privacy Policy",
+        "version": "1.0",
+        "effective_date": "2026-05-18",
+        "sections": [
+            {
+                "heading": "Information We Collect",
+                "body": "We collect account details, business profile information, phone number, product records, customer records, bills, reports, subscription information, and payment status needed to operate the app.",
+            },
+            {
+                "heading": "How We Use Information",
+                "body": "Information is used to provide login, billing, inventory, customer management, reporting, subscription, support, and security features.",
+            },
+            {
+                "heading": "Sharing",
+                "body": "We do not sell your business data. Information may be shared with infrastructure, authentication, payment, analytics, or support providers only when needed to run the service.",
+            },
+            {
+                "heading": "Retention and Deletion",
+                "body": "You can request account deletion from the app. Deleting the account removes the login and, when no other users are linked to the business, removes associated business data.",
+            },
+            {
+                "heading": "Contact",
+                "body": "For privacy or account questions, contact the NuvaBill support team through your official support channel.",
+            },
+        ],
+    },
+}
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def legal_document(request, document_type):
+    document = LEGAL_DOCUMENTS.get(document_type)
+    if not document:
+        return Response({"detail": "Legal document not found."}, status=status.HTTP_404_NOT_FOUND)
+    return Response(document)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def support_contact(request):
+    return Response(
+        {
+            "phone": "7219575187",
+            "email": "supportnuvabill@gmail.com",
+            "label": "NuvaBill Support",
+        },
+    )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def product_unit_types(request):
+    return Response(
+        [
+            {"value": value, "label": label}
+            for value, label in Product.UNIT_TYPES
+        ],
+    )
+
+
+@api_view(["DELETE"])
+@permission_classes([permissions.IsAuthenticated])
+def account_delete(request):
+    user = request.user
+    business = get_request_business(request)
+    business_id = business.id if business else None
+    business_user_count = business.users.count() if business else 0
+
+    user.delete()
+
+    if business and business_user_count <= 1:
+        business.delete()
+
+    return Response(
+        {
+            "detail": "Account deleted successfully.",
+            "business_deleted": bool(business_id and business_user_count <= 1),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
 @api_view(["GET"])
 @permission_classes([permissions.AllowAny])
 def subscription_plans(request):
