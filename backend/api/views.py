@@ -532,6 +532,16 @@ class RegisterView(APIView):
             user=user,
             phone=user.profile.phone,
         )
+        subscription = None
+
+        if user.profile.business_profile:
+            trial_plan, trial_plan_data = get_app_subscription_plan("free_trial_7_days")
+            subscription = activate_business_subscription(
+                user.profile.business_profile,
+                trial_plan,
+                trial_plan_data,
+                notes="Automatically created when the business registered.",
+            )
 
         return Response(
             {
@@ -544,6 +554,11 @@ class RegisterView(APIView):
                     "phone": user.profile.phone,
                 },
                 "business_profile": business_profile,
+                "subscription": (
+                    BusinessSubscriptionSerializer(subscription).data
+                    if subscription
+                    else None
+                ),
             },
             status=status.HTTP_201_CREATED,
         )

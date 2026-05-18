@@ -6,3 +6,5 @@ firebase-service-account*.json
 *-firebase-adminsdk-*.json
 db.sqlite3
 media/
+
+frontend/
