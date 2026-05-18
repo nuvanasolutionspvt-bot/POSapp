@@ -12,6 +12,7 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -64,6 +65,9 @@ def get_local_day_range(day):
 
 
 REPORT_PERIODS = {"daily", "weekly", "monthly"}
+# Temporary Play Store review bypass. Remove after approval.
+PLAY_STORE_REVIEW_PHONE = "7219575187"
+PLAY_STORE_REVIEW_OTP = "456123"
 
 
 def get_report_period_range(period):
@@ -436,6 +440,74 @@ def get_user_profile_by_phone(phone):
     return None
 
 
+def get_or_create_play_store_review_profile():
+    profile = get_user_profile_by_phone(PLAY_STORE_REVIEW_PHONE)
+    if profile:
+        return profile
+
+    user, _created = User.objects.get_or_create(
+        username="playstore_reviewer",
+        defaults={
+            "email": "supportnuvabill@gmail.com",
+            "first_name": "Play Store",
+            "last_name": "Reviewer",
+        },
+    )
+    if not user.has_usable_password():
+        user.set_unusable_password()
+        user.save(update_fields=("password",))
+
+    business_profile = BusinessProfile.objects.filter(phone=PLAY_STORE_REVIEW_PHONE).first()
+    if business_profile is None:
+        business_profile = BusinessProfile.objects.create(
+            name="NuvaBill Review Store",
+            business_type="Others",
+            phone=PLAY_STORE_REVIEW_PHONE,
+            email="supportnuvabill@gmail.com",
+            address="Pune",
+        )
+
+    profile, _created = UserProfile.objects.get_or_create(
+        user=user,
+        defaults={
+            "phone": PLAY_STORE_REVIEW_PHONE,
+            "business_profile": business_profile,
+        },
+    )
+    changed_fields = []
+    if normalize_local_phone_digits(profile.phone) != PLAY_STORE_REVIEW_PHONE:
+        profile.phone = PLAY_STORE_REVIEW_PHONE
+        changed_fields.append("phone")
+    if profile.business_profile_id is None:
+        profile.business_profile = business_profile
+        changed_fields.append("business_profile")
+    if changed_fields:
+        profile.save(update_fields=changed_fields)
+
+    return profile
+
+
+def build_profile_login_response(profile):
+    refresh = RefreshToken.for_user(profile.user)
+    business_profile = serialize_business_profile(
+        profile.business_profile,
+        user=profile.user,
+        phone=profile.phone,
+    )
+
+    return {
+        "refresh": str(refresh),
+        "access": str(refresh.access_token),
+        "user": {
+            "id": profile.user.id,
+            "username": profile.user.username,
+            "email": profile.user.email,
+            "phone": profile.phone,
+        },
+        "business_profile": business_profile,
+    }
+
+
 def requested_phone_matches_verified_phone(requested_phone, verified_phone):
     if not requested_phone:
         return True
@@ -609,6 +681,13 @@ class OTPVerifyView(APIView):
         profile = get_user_profile_by_phone(phone)
         lookup_phone = profile.phone if profile else normalize_local_phone_digits(phone)
         code = serializer.validated_data["otp"]
+
+        if (
+            normalize_local_phone_digits(phone) == PLAY_STORE_REVIEW_PHONE
+            and code == PLAY_STORE_REVIEW_OTP
+        ):
+            review_profile = get_or_create_play_store_review_profile()
+            return Response(build_profile_login_response(review_profile))
 
         try:
             otp = LoginOTP.objects.select_related("user").filter(
