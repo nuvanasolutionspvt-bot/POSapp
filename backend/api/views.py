@@ -923,6 +923,92 @@ def health_check(request):
     return Response({"status": "ok"})
 
 
+def parse_version(value):
+    parts = []
+    for part in str(value or "").split("."):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts or [0])
+
+
+def compare_versions(left, right):
+    left_parts = list(parse_version(left))
+    right_parts = list(parse_version(right))
+    max_length = max(len(left_parts), len(right_parts))
+    left_parts.extend([0] * (max_length - len(left_parts)))
+    right_parts.extend([0] * (max_length - len(right_parts)))
+
+    if left_parts < right_parts:
+        return -1
+    if left_parts > right_parts:
+        return 1
+    return 0
+
+
+def parse_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def app_update_check(request):
+    platform = request.query_params.get("platform", "android").lower()
+    prefix = "IOS" if platform == "ios" else "ANDROID"
+
+    latest_version = os.environ.get(f"{prefix}_LATEST_VERSION", "1.0")
+    latest_build = parse_int(os.environ.get(f"{prefix}_LATEST_BUILD"), 1)
+    minimum_supported_version = os.environ.get(f"{prefix}_MIN_SUPPORTED_VERSION", "1.0")
+    minimum_supported_build = parse_int(os.environ.get(f"{prefix}_MIN_SUPPORTED_BUILD"), 1)
+    current_version = request.query_params.get("version", "0")
+    current_build = parse_int(request.query_params.get("build"), 0)
+
+    update_available = (
+        current_build < latest_build
+        or compare_versions(current_version, latest_version) < 0
+    )
+    update_required = (
+        current_build < minimum_supported_build
+        or compare_versions(current_version, minimum_supported_version) < 0
+    )
+    release_notes = os.environ.get(
+        f"{prefix}_RELEASE_NOTES",
+        "Bug fixes and performance improvements.",
+    )
+
+    return Response(
+        {
+            "platform": platform,
+            "current_version": current_version,
+            "current_build": current_build,
+            "latest_version": latest_version,
+            "latest_build": latest_build,
+            "minimum_supported_version": minimum_supported_version,
+            "minimum_supported_build": minimum_supported_build,
+            "update_available": update_available,
+            "update_required": update_required,
+            "title": os.environ.get(f"{prefix}_UPDATE_TITLE", "Update available"),
+            "message": os.environ.get(
+                f"{prefix}_UPDATE_MESSAGE",
+                "A newer version of NuvaBill is available.",
+            ),
+            "store_url": os.environ.get(
+                f"{prefix}_UPDATE_URL",
+                "https://play.google.com/store/apps/details?id=com.nuvabill",
+            ),
+            "release_notes": [
+                note.strip()
+                for note in release_notes.split("|")
+                if note.strip()
+            ],
+        },
+    )
+
+
 LEGAL_DOCUMENTS = {
     "terms": {
         "title": "Terms and Conditions",
