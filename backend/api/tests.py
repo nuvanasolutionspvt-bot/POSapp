@@ -1,5 +1,13 @@
-from django.test import RequestFactory, TestCase
+from datetime import timedelta
+from unittest.mock import patch
 
+from django.contrib.auth.models import User
+from django.test import RequestFactory, TestCase
+from django.urls import reverse
+from django.utils import timezone
+from rest_framework.test import APITestCase
+
+from .models import BusinessProfile, BusinessSubscription, SubscriptionPlan, UserProfile
 from .serializers import BillItemSerializer
 
 
@@ -40,3 +48,119 @@ class BillItemSerializerTests(TestCase):
             serializer.validated_data["image_url"],
             "http://192.168.1.12:8000/media/products/1000498526_1tdezC2.jpg",
         )
+
+
+class RegisterViewTests(APITestCase):
+    def test_register_business_activates_7_day_trial_subscription(self):
+        response = self.client.post(
+            reverse("auth-register"),
+            {
+                "username": "trialowner",
+                "email": "owner@example.com",
+                "password": "Password123",
+                "phone": "9876543210",
+                "business_name": "Trial Store",
+                "business_type": "Others",
+                "business_address": "Test address",
+                "gstin": "",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        subscription = BusinessSubscription.objects.select_related("business", "plan").get(
+            business__phone="9876543210",
+        )
+        expected_end_date = timezone.localdate() + timedelta(days=7)
+
+        self.assertEqual(subscription.status, "trial")
+        self.assertEqual(subscription.plan.code, "free_trial_7_days")
+        self.assertEqual(subscription.starts_at, timezone.localdate())
+        self.assertEqual(subscription.ends_at, expected_end_date)
+        self.assertEqual(subscription.trial_ends_at, expected_end_date)
+        self.assertEqual(response.data["subscription"]["status"], "trial")
+        self.assertEqual(response.data["subscription"]["plan_name"], "Free Trial")
+
+        trial_plan = SubscriptionPlan.objects.get(code="free_trial_7_days")
+        self.assertEqual(trial_plan.max_products, 50)
+
+
+class LegalAndAccountTests(APITestCase):
+    def test_app_update_check_returns_update_available(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ANDROID_LATEST_VERSION": "1.2.0",
+                "ANDROID_LATEST_BUILD": "5",
+                "ANDROID_MIN_SUPPORTED_VERSION": "1.0.0",
+                "ANDROID_MIN_SUPPORTED_BUILD": "1",
+                "ANDROID_RELEASE_NOTES": "New reports|Bug fixes",
+            },
+        ):
+            response = self.client.get(
+                reverse("app-update-check"),
+                {"platform": "android", "version": "1.0.0", "build": "1"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["update_available"])
+        self.assertFalse(response.data["update_required"])
+        self.assertEqual(response.data["latest_version"], "1.2.0")
+        self.assertEqual(response.data["latest_build"], 5)
+        self.assertEqual(response.data["release_notes"], ["New reports", "Bug fixes"])
+
+    def test_app_update_check_marks_required_below_min_supported_build(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "ANDROID_LATEST_VERSION": "2.0.0",
+                "ANDROID_LATEST_BUILD": "10",
+                "ANDROID_MIN_SUPPORTED_VERSION": "1.5.0",
+                "ANDROID_MIN_SUPPORTED_BUILD": "7",
+            },
+        ):
+            response = self.client.get(
+                reverse("app-update-check"),
+                {"platform": "android", "version": "1.4.0", "build": "6"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["update_available"])
+        self.assertTrue(response.data["update_required"])
+
+    def test_terms_document_is_public(self):
+        response = self.client.get(reverse("legal-document", kwargs={"document_type": "terms"}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["title"], "Terms and Conditions")
+        self.assertGreater(len(response.data["sections"]), 0)
+
+    def test_support_contact_is_public(self):
+        response = self.client.get(reverse("support-contact"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["phone"], "7219575187")
+        self.assertEqual(response.data["email"], "supportnuvabill@gmail.com")
+
+    def test_product_unit_types_requires_auth_and_returns_choices(self):
+        user = User.objects.create_user(username="unit-user", password="Password123")
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get(reverse("product-unit-types"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn({"value": "pc", "label": "Piece"}, response.data)
+
+    def test_account_delete_removes_user_and_single_user_business(self):
+        user = User.objects.create_user(username="delete-user", password="Password123")
+        business = BusinessProfile.objects.create(name="Delete Store", phone="9000000000")
+        UserProfile.objects.create(user=user, phone="9000000000", business_profile=business)
+
+        self.client.force_authenticate(user=user)
+        response = self.client.delete(reverse("account-delete"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(id=user.id).exists())
+        self.assertFalse(BusinessProfile.objects.filter(id=business.id).exists())
+        self.assertTrue(response.data["business_deleted"])

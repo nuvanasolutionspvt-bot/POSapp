@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.mail import send_mail
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -143,6 +144,116 @@ def build_simple_pdf(lines):
         ),
     )
     return bytes(pdf)
+
+
+def build_receipt_pdf(lines):
+    page_width = 226
+    line_height = 12
+    top_padding = 18
+    bottom_padding = 18
+    page_height = max(360, top_padding + bottom_padding + (len(lines) * line_height))
+    start_y = page_height - top_padding
+    content_lines = ["BT", "/F1 9 Tf", f"12 {start_y} Td", f"{line_height} TL"]
+
+    for index, line in enumerate(lines):
+      if index:
+          content_lines.append("T*")
+      content_lines.append(f"({pdf_escape(line)}) Tj")
+
+    content_lines.append("ET")
+    content = "\n".join(content_lines).encode("latin-1", "replace")
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_width} {page_height}] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".encode("ascii"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
+        b"<< /Length " + str(len(content)).encode("ascii") + b" >>\nstream\n" + content + b"\nendstream",
+    ]
+
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{number} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+
+    pdf.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode(
+            "ascii",
+        ),
+    )
+    return bytes(pdf)
+
+
+def receipt_center(value, width=32):
+    return str(value)[:width].center(width)
+
+
+def receipt_pair(left, right, width=32):
+    left = str(left)
+    right = str(right)
+    available = max(1, width - len(right))
+    return f"{left[:available].ljust(available)}{right}"[:width]
+
+
+def build_bill_pdf_lines(bill):
+    business = bill.business
+    created_at = timezone.localtime(bill.created_at)
+    lines = [
+        receipt_center(business.name),
+        receipt_center(business.address) if business.address else "",
+        receipt_center(f"Phone: {business.phone}") if business.phone else "",
+        receipt_center(f"GSTIN: {business.gstin}") if business.gstin else "",
+        "-" * 32,
+        f"Invoice: {bill.invoice_id}",
+        f"Date: {created_at:%d %b %Y, %I:%M %p}",
+        f"Payment: {bill.payment_mode}",
+        "-" * 32,
+    ]
+
+    if bill.customer:
+        lines.extend(
+            [
+                f"Customer: {bill.customer.full_name}",
+                f"Customer phone: {bill.customer.phone}" if bill.customer.phone else "",
+            ],
+        )
+
+    for item in bill.items.all():
+        line_total = Decimal(item.price) * Decimal(item.quantity)
+        lines.append(str(item.name)[:32])
+        lines.append(
+            receipt_pair(
+                f"{item.quantity} x {money(item.price)}",
+                money(line_total),
+            ),
+        )
+
+    if not bill.items.exists():
+        lines.append("No items in this bill.")
+
+    lines.extend(
+        [
+            "-" * 32,
+            receipt_pair("Subtotal", money(bill.subtotal)),
+            receipt_pair("Discount", money(bill.discount)),
+            receipt_pair("Tax", money(bill.tax)),
+            receipt_pair("TOTAL", money(bill.grand_total)),
+            "-" * 32,
+            receipt_center("Thank you"),
+        ],
+    )
+    return [line for line in lines if line != ""]
 
 
 def serialize_business_profile(profile, user=None, phone=""):
@@ -1167,6 +1278,50 @@ def support_contact(request):
     )
 
 
+@require_http_methods(["GET", "POST"])
+def account_delete_request(request):
+    support_email = "supportnuvabill@gmail.com"
+    context = {
+        "support_email": support_email,
+        "submitted": False,
+        "mail_failed": False,
+    }
+
+    if request.method == "POST":
+        full_name = request.POST.get("full_name", "").strip()
+        phone = request.POST.get("phone", "").strip()
+        email = request.POST.get("email", "").strip()
+        business_name = request.POST.get("business_name", "").strip()
+        note = request.POST.get("note", "").strip()
+
+        message = "\n".join(
+            [
+                "NuvaBill account deletion request",
+                "",
+                f"Name: {full_name or '-'}",
+                f"Registered phone: {phone or '-'}",
+                f"Email: {email or '-'}",
+                f"Business/shop name: {business_name or '-'}",
+                f"Additional note: {note or '-'}",
+            ],
+        )
+
+        try:
+            send_mail(
+                "NuvaBill account deletion request",
+                message,
+                getattr(settings, "DEFAULT_FROM_EMAIL", support_email),
+                [support_email],
+                fail_silently=False,
+            )
+        except Exception:
+            context["mail_failed"] = True
+
+        context["submitted"] = True
+
+    return render(request, "api/account_delete_request.html", context)
+
+
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def product_unit_types(request):
@@ -1452,6 +1607,24 @@ def reports_summary(request):
             "top_products": top_products_data,
         },
     )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def bill_pdf(request, bill_id):
+    business = get_pdf_request_business(request)
+    if not business:
+        return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    bill = get_object_or_404(
+        Bill.objects.prefetch_related("items").select_related("business", "customer"),
+        id=bill_id,
+        business=business,
+    )
+    filename = f"bill-{bill.invoice_id}.pdf"
+    response = HttpResponse(build_receipt_pdf(build_bill_pdf_lines(bill)), content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 @api_view(["GET"])

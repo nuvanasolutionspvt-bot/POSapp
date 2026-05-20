@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NuvaBill Account Deletion</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #172033;
+      background: #f6f8fb;
+    }
+
+    body {
+      margin: 0;
+      padding: 32px 16px;
+    }
+
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px solid #dfe6ef;
+      border-radius: 8px;
+      padding: 28px;
+      box-shadow: 0 8px 24px rgba(20, 32, 50, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.2;
+    }
+
+    h2 {
+      margin: 28px 0 10px;
+      font-size: 20px;
+    }
+
+    p, li {
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    ul {
+      padding-left: 22px;
+    }
+
+    label {
+      display: block;
+      margin: 16px 0 6px;
+      font-weight: 700;
+    }
+
+    input, textarea {
+      box-sizing: border-box;
+      width: 100%;
+      border: 1px solid #b9c4d2;
+      border-radius: 6px;
+      padding: 11px 12px;
+      font: inherit;
+    }
+
+    textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    button {
+      margin-top: 20px;
+      border: 0;
+      border-radius: 6px;
+      background: #1565c0;
+      color: #ffffff;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+      padding: 12px 18px;
+    }
+
+    .meta {
+      margin-top: 0;
+      color: #516070;
+    }
+
+    .notice {
+      border-radius: 6px;
+      margin: 20px 0;
+      padding: 14px 16px;
+      background: #e8f4ee;
+      border: 1px solid #9ed0b3;
+    }
+
+    .warning {
+      background: #fff7e6;
+      border-color: #f0c36d;
+    }
+
+    .required {
+      color: #b00020;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>NuvaBill Account and Data Deletion</h1>
+    <p class="meta">App package: com.nuvabill</p>
+
+    <p>
+      You can request deletion of your NuvaBill account and associated business data using this page.
+      You can also contact support directly at <a href="mailto:{{ support_email }}">{{ support_email }}</a>.
+    </p>
+
+    {% if submitted %}
+      <div class="notice{% if mail_failed %} warning{% endif %}">
+        {% if mail_failed %}
+          Your request details could not be emailed automatically from this server. Please email the same details to
+          <a href="mailto:{{ support_email }}">{{ support_email }}</a> so our support team can process the deletion.
+        {% else %}
+          Your account deletion request was submitted. The NuvaBill support team will review it and contact you if
+          verification is required.
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <h2>What Will Be Deleted</h2>
+    <ul>
+      <li>Your NuvaBill login account and profile details.</li>
+      <li>Your business profile if no other users are linked to the same business.</li>
+      <li>Business data linked to that profile, including products, customers, bills, and reports where applicable.</li>
+    </ul>
+
+    <h2>What May Be Retained</h2>
+    <p>
+      Some records may be retained only when required for legal, tax, security, payment, fraud-prevention, or dispute
+      resolution obligations. These retained records are kept only for the required period.
+    </p>
+
+    <h2>Request Deletion</h2>
+    <form method="post">
+      {% csrf_token %}
+
+      <label for="full_name">Full name</label>
+      <input id="full_name" name="full_name" autocomplete="name">
+
+      <label for="phone">Registered phone number <span class="required">*</span></label>
+      <input id="phone" name="phone" autocomplete="tel" required>
+
+      <label for="email">Email address</label>
+      <input id="email" name="email" type="email" autocomplete="email">
+
+      <label for="business_name">Business or shop name</label>
+      <input id="business_name" name="business_name">
+
+      <label for="note">Additional details</label>
+      <textarea id="note" name="note" placeholder="Add any detail that helps us identify your account."></textarea>
+
+      <button type="submit">Submit Deletion Request</button>
+    </form>
+  </main>
+</body>
+</html>
