@@ -63,6 +63,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     business_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     business_address = serializers.CharField(write_only=True, required=False, allow_blank=True)
     gstin = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    plan_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
     business_type = serializers.ChoiceField(
         choices=BusinessProfile.BUSINESS_TYPES,
         write_only=True,
@@ -81,6 +82,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             "business_name",
             "business_address",
             "gstin",
+            "plan_code",
             "business_type",
         )
 
@@ -100,6 +102,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         business_name = validated_data.pop("business_name", "")
         business_address = validated_data.pop("business_address", "")
         gstin = validated_data.pop("gstin", "")
+        validated_data.pop("plan_code", "")
         business_type = validated_data.pop("business_type", "Others")
         phone = validated_data.pop("phone")
         password = validated_data.pop("password")

@@ -47,6 +47,7 @@ class BusinessProfile(TimeStampedModel):
     BUSINESS_TYPES = (
         ("Food shop", "Food shop"),
         ("Medical shop", "Medical shop"),
+        ("Kirana shop", "Kirana shop"),
         ("Others", "Others"),
     )
 

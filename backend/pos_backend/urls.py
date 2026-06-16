@@ -18,7 +18,12 @@ Including another URLconf
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import include, path
-from api.views import subscription_admin_logout, subscription_admin_panel, subscription_owner_login
+from api.views import (
+    subscription_admin_businesses,
+    subscription_admin_logout,
+    subscription_admin_panel,
+    subscription_owner_login,
+)
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
 from rest_framework import permissions
@@ -36,6 +41,11 @@ schema_view = get_schema_view(
 urlpatterns = [
     path("subscription-admin/login/", subscription_owner_login, name="subscription-owner-login"),
     path("subscription-admin/", subscription_admin_panel, name="subscription-admin-root"),
+    path(
+        "subscription-admin/businesses/",
+        subscription_admin_businesses,
+        name="subscription-admin-businesses",
+    ),
     path("subscription-admin/logout/", subscription_admin_logout, name="subscription-admin-logout-root"),
     path("api/", include("api.urls")),
     path(

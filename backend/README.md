@@ -42,10 +42,13 @@ Firebase Console > Project settings > Service accounts and place it in
 
 ```env
 FIREBASE_SERVICE_ACCOUNT_PATH=firebase-service-account.json
-FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_PROJECT_ID=nuva-bill
+FIREBASE_CLIENT_PROJECT_ID=nuva-bill
 ```
 
-The service account JSON is ignored by git. Do not commit it.
+Both project IDs must match `project_info.project_id` in the mobile app's
+`android/app/google-services.json`. Download the service account from that same
+Firebase project. The service account JSON is ignored by git. Do not commit it.
 
 3. Run migrations:
 

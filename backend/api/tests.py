@@ -85,6 +85,134 @@ class RegisterViewTests(APITestCase):
         trial_plan = SubscriptionPlan.objects.get(code="free_trial_7_days")
         self.assertEqual(trial_plan.max_products, 50)
 
+    def test_register_business_with_paid_plan_does_not_activate_trial(self):
+        response = self.client.post(
+            reverse("auth-register"),
+            {
+                "username": "paidowner",
+                "email": "paid@example.com",
+                "password": "Password123",
+                "phone": "9876543211",
+                "business_name": "Paid Store",
+                "business_type": "Others",
+                "business_address": "Test address",
+                "gstin": "",
+                "plan_code": "monthly_499",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.data["subscription"])
+        self.assertFalse(
+            BusinessSubscription.objects.filter(business__phone="9876543211").exists(),
+        )
+        self.assertTrue(SubscriptionPlan.objects.filter(code="monthly_499").exists())
+
+
+class FirebaseLoginViewTests(APITestCase):
+    @patch("api.views.verify_firebase_id_token")
+    def test_firebase_token_verification_failure_returns_401_with_code(
+        self,
+        verify_firebase_id_token,
+    ):
+        verify_firebase_id_token.side_effect = ValueError("wrong audience")
+
+        response = self.client.post(
+            reverse("auth-firebase-login"),
+            {"id_token": "invalid-token", "phone": "9876543210"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.data["code"],
+            "firebase_token_verification_failed",
+        )
+
+    @patch("api.views.verify_firebase_id_token")
+    def test_firebase_login_accepts_matching_verified_phone(
+        self,
+        verify_firebase_id_token,
+    ):
+        user = User.objects.create_user(username="firebase-user", password="Password123")
+        business = BusinessProfile.objects.create(name="Firebase Store", phone="9876543210")
+        UserProfile.objects.create(
+            user=user,
+            phone="9876543210",
+            business_profile=business,
+        )
+        verify_firebase_id_token.return_value = {
+            "phone_number": "+919876543210",
+        }
+
+        response = self.client.post(
+            reverse("auth-firebase-login"),
+            {"id_token": "valid-token", "phone": "9876543210"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["user"]["phone"], "9876543210")
+
+
+class SubscriptionAdminBusinessTests(TestCase):
+    def setUp(self):
+        session = self.client.session
+        session["subscription_owner_logged_in"] = True
+        session.save()
+
+    def test_businesses_page_lists_registered_business_details(self):
+        user = User.objects.create_user(
+            username="registered-owner",
+            email="owner@example.com",
+            password="Password123",
+        )
+        business = BusinessProfile.objects.create(
+            name="Registered Store",
+            business_type="Food shop",
+            phone="9876543210",
+            email="store@example.com",
+            address="Pune",
+            gstin="27ABCDE1234F1Z5",
+        )
+        UserProfile.objects.create(
+            user=user,
+            phone="9876543210",
+            business_profile=business,
+        )
+
+        response = self.client.get(reverse("subscription-admin-businesses"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Registered Store")
+        self.assertContains(response, "registered-owner")
+        self.assertContains(response, "27ABCDE1234F1Z5")
+        self.assertContains(response, "Not assigned")
+
+    def test_businesses_page_requires_owner_session(self):
+        self.client.session.flush()
+
+        response = self.client.get(reverse("subscription-admin-businesses"))
+
+        self.assertRedirects(
+            response,
+            "/subscription-admin/login/",
+            fetch_redirect_response=False,
+        )
+
+    def test_business_search_filters_registered_businesses(self):
+        BusinessProfile.objects.create(name="Alpha Store", phone="9000000001")
+        BusinessProfile.objects.create(name="Beta Store", phone="9000000002")
+
+        response = self.client.get(
+            reverse("subscription-admin-businesses"),
+            {"q": "Alpha"},
+        )
+
+        self.assertContains(response, "Alpha Store")
+        self.assertNotContains(response, "Beta Store")
+
 
 class LegalAndAccountTests(APITestCase):
     def test_app_update_check_returns_update_available(self):

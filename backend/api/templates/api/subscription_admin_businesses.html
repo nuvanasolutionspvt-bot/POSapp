@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registered Businesses | NuvaBill</title>
+  <style>
+    :root {
+      --primary: #02066F;
+      --primary-soft: #eef0ff;
+      --bg: #f5f6fb;
+      --card: #ffffff;
+      --line: #d9deea;
+      --text: #111827;
+      --muted: #667085;
+      --success: #067647;
+      --warning: #b54708;
+      --danger: #b42318;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--primary);
+      color: #fff;
+      padding: 24px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 26px;
+      border-bottom: 1px solid rgba(255,255,255,.18);
+      margin-bottom: 22px;
+    }
+
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: #fff;
+      color: var(--primary);
+      font-weight: 900;
+    }
+
+    .brand-title { font-size: 18px; font-weight: 800; }
+    .brand-subtitle { font-size: 12px; color: rgba(255,255,255,.72); margin-top: 2px; }
+
+    .nav-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: rgba(255,255,255,.58);
+      margin: 18px 10px 8px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: rgba(255,255,255,.82);
+      padding: 12px 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .nav-item.active,
+    .nav-item:hover {
+      background: rgba(255,255,255,.14);
+      color: #fff;
+    }
+
+    .nav-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .main {
+      padding: 28px;
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    h1, p { margin: 0; }
+    h1 { font-size: 28px; }
+    .muted { color: var(--muted); font-size: 13px; margin-top: 5px; }
+
+    .date-pill {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: var(--primary);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .metric, .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 10px 24px rgba(17,24,39,.06);
+    }
+
+    .metric { padding: 18px; }
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .metric strong {
+      display: block;
+      color: var(--primary);
+      font-size: 32px;
+      margin-top: 8px;
+    }
+
+    .panel { overflow: hidden; }
+    .panel-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .panel-header h2 { margin: 0; font-size: 18px; }
+    .search-form {
+      display: flex;
+      gap: 8px;
+      width: min(440px, 100%);
+    }
+
+    .search-form input {
+      min-width: 0;
+      flex: 1;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: inherit;
+      color: var(--text);
+    }
+
+    .search-form button,
+    .clear-link {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 800;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .search-form button { background: var(--primary); color: #fff; }
+    .clear-link { background: var(--primary-soft); color: var(--primary); }
+
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td {
+      text-align: left;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      background: #fbfcff;
+      white-space: nowrap;
+    }
+    tr:last-child td { border-bottom: 0; }
+
+    .business-name { font-weight: 900; font-size: 14px; }
+    .detail-line { color: var(--muted); margin-top: 5px; line-height: 18px; }
+    .detail-line strong { color: #344054; }
+
+    .status {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 11px;
+      font-weight: 900;
+      background: #eef2ff;
+      color: var(--primary);
+      text-transform: uppercase;
+    }
+    .status.expired, .status.cancelled, .status.none {
+      background: #fee4e2;
+      color: var(--danger);
+    }
+    .status.past_due { background: #fef0c7; color: var(--warning); }
+    .status.active { background: #dcfae6; color: var(--success); }
+    .status.trial { background: #eef4ff; color: var(--primary); }
+
+    .counts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(75px, 1fr));
+      gap: 6px;
+    }
+    .count-chip {
+      border-radius: 8px;
+      padding: 7px 8px;
+      background: #f8f9fc;
+      color: #344054;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .empty {
+      padding: 32px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .panel-header { align-items: stretch; flex-direction: column; }
+      .search-form { width: 100%; }
+    }
+
+    @media (max-width: 620px) {
+      .main { padding: 18px; }
+      .topbar { flex-direction: column; }
+      .metrics { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">NB</div>
+        <div>
+          <div class="brand-title">NuvaBill</div>
+          <div class="brand-subtitle">Subscription Control</div>
+        </div>
+      </div>
+
+      <div class="nav-title">Dashboard</div>
+      <a class="nav-item" href="{% url 'subscription-admin-root' %}"><span class="nav-dot"></span> Overview</a>
+      <a class="nav-item" href="{% url 'subscription-admin-root' %}#plans"><span class="nav-dot"></span> Plans</a>
+      <a class="nav-item" href="{% url 'subscription-admin-root' %}#assign"><span class="nav-dot"></span> Assign Subscription</a>
+      <a class="nav-item active" href="{% url 'subscription-admin-businesses' %}"><span class="nav-dot"></span> Businesses</a>
+
+      <div class="nav-title">App Flow</div>
+      <a class="nav-item" href="{% url 'subscription-admin-businesses' %}"><span class="nav-dot"></span> Refresh Page</a>
+      <a class="nav-item" href="{% url 'subscription-admin-logout-root' %}"><span class="nav-dot"></span> Logout</a>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>Registered Businesses</h1>
+          <p class="muted">Every business registered in NuvaBill, including account, subscription, and activity details.</p>
+        </div>
+        <div class="date-pill">{{ today }}</div>
+      </header>
+
+      <section class="metrics">
+        <div class="metric"><span>Total Registered</span><strong>{{ metrics.total }}</strong></div>
+        <div class="metric"><span>With Subscription</span><strong>{{ metrics.with_subscription }}</strong></div>
+        <div class="metric"><span>Current</span><strong>{{ metrics.active }}</strong></div>
+        <div class="metric"><span>No Subscription</span><strong>{{ metrics.without_subscription }}</strong></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Business Directory</h2>
+            <p class="muted">{{ businesses|length }} result{{ businesses|length|pluralize }}</p>
+          </div>
+          <form class="search-form" method="get">
+            <input
+              name="q"
+              value="{{ search_query }}"
+              placeholder="Search name, phone, email, GSTIN or owner"
+              aria-label="Search businesses"
+            >
+            <button type="submit">Search</button>
+            {% if search_query %}
+              <a class="clear-link" href="{% url 'subscription-admin-businesses' %}">Clear</a>
+            {% endif %}
+          </form>
+        </div>
+
+        {% if businesses %}
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Business</th>
+                  <th>Contact</th>
+                  <th>Owner / User</th>
+                  <th>Subscription</th>
+                  <th>App Data</th>
+                  <th>Registered</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for business in businesses %}
+                  <tr>
+                    <td>
+                      <div class="business-name">{{ business.name }}</div>
+                      <div class="detail-line">{{ business.business_type }}</div>
+                      {% if business.gstin %}
+                        <div class="detail-line"><strong>GSTIN:</strong> {{ business.gstin }}</div>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <div><strong>{{ business.phone|default:"No phone" }}</strong></div>
+                      <div class="detail-line">{{ business.email|default:"No business email" }}</div>
+                      <div class="detail-line">{{ business.address|default:"No address" }}</div>
+                    </td>
+                    <td>
+                      {% for profile in business.users.all %}
+                        <div><strong>{{ profile.user.username }}</strong></div>
+                        <div class="detail-line">{{ profile.phone }}</div>
+                        <div class="detail-line">{{ profile.user.email|default:"No user email" }}</div>
+                      {% empty %}
+                        <span class="status none">No linked user</span>
+                      {% endfor %}
+                    </td>
+                    <td>
+                      {% if business.subscription %}
+                        <span class="status {{ business.subscription.status }}">
+                          {{ business.subscription.get_status_display }}
+                        </span>
+                        <div class="detail-line"><strong>{{ business.subscription.plan.name }}</strong></div>
+                        <div class="detail-line">
+                          {{ business.subscription.starts_at }} to {{ business.subscription.ends_at }}
+                        </div>
+                      {% else %}
+                        <span class="status none">Not assigned</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <div class="counts">
+                        <span class="count-chip">{{ business.users_count }} user{{ business.users_count|pluralize }}</span>
+                        <span class="count-chip">{{ business.products_count }} product{{ business.products_count|pluralize }}</span>
+                        <span class="count-chip">{{ business.customers_count }} customer{{ business.customers_count|pluralize }}</span>
+                        <span class="count-chip">{{ business.bills_count }} bill{{ business.bills_count|pluralize }}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <strong>{{ business.created_at|date:"d M Y" }}</strong>
+                      <div class="detail-line">{{ business.created_at|date:"h:i A" }}</div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="empty">
+            {% if search_query %}
+              No registered businesses match “{{ search_query }}”.
+            {% else %}
+              No businesses have registered yet.
+            {% endif %}
+          </div>
+        {% endif %}
+      </section>
+    </main>
+  </div>
+</body>
+</html>

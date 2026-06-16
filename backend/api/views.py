@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import urllib.error
 import urllib.request
 import uuid
@@ -14,7 +15,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
-from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Sum
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -55,6 +56,8 @@ from .serializers import (
     RegisterSerializer,
     SubscriptionPlanSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def get_local_day_range(day):
@@ -581,6 +584,30 @@ def get_firebase_app():
             credential_path = os.path.join(settings.BASE_DIR, credential_path)
         if not os.path.exists(credential_path):
             raise RuntimeError(f"Firebase service account file not found: {credential_path}")
+
+        with open(credential_path, encoding="utf-8") as credential_file:
+            credential_data = json.load(credential_file)
+
+        credential_project_id = credential_data.get("project_id", "")
+        if (
+            settings.FIREBASE_CLIENT_PROJECT_ID
+            and settings.FIREBASE_PROJECT_ID != settings.FIREBASE_CLIENT_PROJECT_ID
+        ):
+            raise RuntimeError(
+                "Firebase Admin project does not match the mobile Firebase project."
+            )
+
+        if (
+            credential_project_id
+            and settings.FIREBASE_PROJECT_ID
+            and credential_project_id != settings.FIREBASE_PROJECT_ID
+        ):
+            logger.warning(
+                "Firebase service account project %s differs from token verification project %s.",
+                credential_project_id,
+                settings.FIREBASE_PROJECT_ID,
+            )
+
         return firebase_admin.initialize_app(credentials.Certificate(credential_path), options)
 
     return firebase_admin.initialize_app(options=options or None)
@@ -637,6 +664,15 @@ class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        selected_plan_code = serializer.validated_data.get("plan_code") or "free_trial_7_days"
+        selected_plan, selected_plan_data = get_app_subscription_plan(selected_plan_code)
+
+        if not selected_plan:
+            return Response(
+                {"detail": "Invalid subscription plan."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         user = serializer.save()
         refresh = RefreshToken.for_user(user)
         business_profile = serialize_business_profile(
@@ -646,12 +682,11 @@ class RegisterView(APIView):
         )
         subscription = None
 
-        if user.profile.business_profile:
-            trial_plan, trial_plan_data = get_app_subscription_plan("free_trial_7_days")
+        if user.profile.business_profile and selected_plan_data["trial"]:
             subscription = activate_business_subscription(
                 user.profile.business_profile,
-                trial_plan,
-                trial_plan_data,
+                selected_plan,
+                selected_plan_data,
                 notes="Automatically created when the business registered.",
             )
 
@@ -801,22 +836,41 @@ class FirebaseLoginView(APIView):
         try:
             decoded_token = verify_firebase_id_token(serializer.validated_data["id_token"])
         except RuntimeError as caught_error:
+            logger.exception("Firebase Admin configuration error during login.")
             return Response({"detail": str(caught_error)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        except Exception:
-            return Response({"detail": "Invalid Firebase login token."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as caught_error:
+            logger.exception(
+                "Firebase ID token verification failed: %s",
+                caught_error.__class__.__name__,
+            )
+            return Response(
+                {
+                    "detail": "Firebase login token could not be verified.",
+                    "code": "firebase_token_verification_failed",
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
 
         firebase_phone = decoded_token.get("phone_number", "")
         requested_phone = serializer.validated_data.get("phone", "")
 
         if not firebase_phone:
+            logger.warning("Verified Firebase token does not contain a phone number.")
             return Response(
-                {"detail": "Firebase token does not include a verified phone number."},
+                {
+                    "detail": "Firebase token does not include a verified phone number.",
+                    "code": "firebase_phone_missing",
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         if not requested_phone_matches_verified_phone(requested_phone, firebase_phone):
+            logger.warning("Requested phone does not match the verified Firebase phone.")
             return Response(
-                {"detail": "Verified Firebase phone does not match requested phone."},
+                {
+                    "detail": "Verified Firebase phone does not match requested phone.",
+                    "code": "firebase_phone_mismatch",
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -970,6 +1024,56 @@ def subscription_admin_panel(request):
             "plans": plans,
             "statuses": BusinessSubscription.STATUSES,
             "subscriptions": subscriptions,
+            "today": today,
+        },
+    )
+
+
+@owner_session_required
+def subscription_admin_businesses(request):
+    search_query = request.GET.get("q", "").strip()
+    businesses = (
+        BusinessProfile.objects.select_related("subscription__plan")
+        .prefetch_related("users__user")
+        .annotate(
+            users_count=Count("users", distinct=True),
+            products_count=Count("products", distinct=True),
+            customers_count=Count("customers", distinct=True),
+            bills_count=Count("bills", distinct=True),
+        )
+        .order_by("-created_at", "name")
+    )
+
+    if search_query:
+        businesses = businesses.filter(
+            Q(name__icontains=search_query)
+            | Q(phone__icontains=search_query)
+            | Q(email__icontains=search_query)
+            | Q(gstin__icontains=search_query)
+            | Q(users__user__username__icontains=search_query)
+            | Q(users__user__email__icontains=search_query)
+        ).distinct()
+
+    today = timezone.localdate()
+    all_businesses = BusinessProfile.objects.all()
+    subscriptions = BusinessSubscription.objects.all()
+    metrics = {
+        "total": all_businesses.count(),
+        "with_subscription": subscriptions.count(),
+        "active": subscriptions.filter(
+            status__in=("active", "trial"),
+            ends_at__gte=today,
+        ).count(),
+        "without_subscription": all_businesses.filter(subscription__isnull=True).count(),
+    }
+
+    return render(
+        request,
+        "api/subscription_admin_businesses.html",
+        {
+            "businesses": businesses,
+            "metrics": metrics,
+            "search_query": search_query,
             "today": today,
         },
     )
