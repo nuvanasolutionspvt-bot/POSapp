@@ -109,6 +109,46 @@ class RegisterViewTests(APITestCase):
         )
         self.assertTrue(SubscriptionPlan.objects.filter(code="monthly_499").exists())
 
+    def test_register_accepts_app_payload_aliases_without_password(self):
+        response = self.client.post(
+            reverse("auth-register"),
+            {
+                "ownerName": "Alias Owner",
+                "businessName": "Alias Store",
+                "businessType": "Kirana Store",
+                "planCode": "free trial",
+                "businessAddress": "Alias address",
+                "phoneNumber": "+91 98765 43212",
+                "gstin": "",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["user"]["username"], "9876543212")
+        self.assertEqual(response.data["business_profile"]["name"], "Alias Store")
+        self.assertEqual(response.data["business_profile"]["businessType"], "Kirana shop")
+        self.assertEqual(response.data["business_profile"]["ownerName"], "Alias Owner")
+        self.assertEqual(response.data["subscription"]["plan_name"], "Free Trial")
+
+    def test_register_unknown_business_type_falls_back_to_others(self):
+        response = self.client.post(
+            reverse("auth-register"),
+            {
+                "username": "unknown-type-owner",
+                "email": "",
+                "password": "Password123",
+                "phone": "9876543213",
+                "business_name": "Unknown Type Store",
+                "business_type": "Retail showroom",
+                "plan_code": "free_trial_7_days",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["business_profile"]["businessType"], "Others")
+
 
 class FirebaseLoginViewTests(APITestCase):
     @patch("api.views.verify_firebase_id_token")

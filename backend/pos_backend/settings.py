@@ -34,6 +34,21 @@ def load_env_file(path):
 load_env_file(BASE_DIR / ".env")
 
 
+def env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_csv(name, default):
+    return [
+        item.strip()
+        for item in os.environ.get(name, default).split(",")
+        if item.strip()
+    ]
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -44,12 +59,12 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env_bool("DJANGO_DEBUG", True)
 
-ALLOWED_HOSTS = os.environ.get(
+ALLOWED_HOSTS = env_csv(
     "DJANGO_ALLOWED_HOSTS",
-    "127.0.0.1,localhost,10.0.2.2",
-).split(",")
+    "127.0.0.1,localhost,10.0.2.2,novanasolutions.in,www.novanasolutions.in",
+)
 
 
 # Application definition
@@ -154,11 +169,15 @@ STATIC_URL = "static/"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-CORS_ALLOWED_ORIGINS = os.environ.get(
+CORS_ALLOWED_ORIGINS = env_csv(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:8081,http://127.0.0.1:8081",
-).split(",")
-CORS_ALLOW_ALL_ORIGINS = os.environ.get("CORS_ALLOW_ALL_ORIGINS", "False") == "True"
+    "http://localhost:3000,http://localhost:8081,http://127.0.0.1:8081,https://novanasolutions.in,https://www.novanasolutions.in",
+)
+CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", False)
+CSRF_TRUSTED_ORIGINS = env_csv(
+    "CSRF_TRUSTED_ORIGINS",
+    "https://novanasolutions.in,https://www.novanasolutions.in",
+)
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

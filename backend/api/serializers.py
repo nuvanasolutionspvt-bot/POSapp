@@ -57,9 +57,78 @@ def normalize_local_phone_number(value):
     return digits
 
 
+def first_present(data, keys):
+    for key in keys:
+        if key in data and data.get(key) not in (None, ""):
+            return data.get(key)
+    return ""
+
+
+def normalize_lookup_value(value):
+    return "".join(character for character in str(value or "").lower() if character.isalnum())
+
+
+BUSINESS_TYPE_ALIASES = {
+    "food": "Food shop",
+    "foodshop": "Food shop",
+    "restaurant": "Food shop",
+    "hotel": "Food shop",
+    "medical": "Medical shop",
+    "medicalshop": "Medical shop",
+    "pharmacy": "Medical shop",
+    "chemist": "Medical shop",
+    "kirana": "Kirana shop",
+    "kiranashop": "Kirana shop",
+    "kiranastore": "Kirana shop",
+    "grocery": "Kirana shop",
+    "groceryshop": "Kirana shop",
+    "generalstore": "Kirana shop",
+    "other": "Others",
+    "others": "Others",
+}
+
+
+PLAN_CODE_ALIASES = {
+    "free": "free_trial_7_days",
+    "trial": "free_trial_7_days",
+    "freetrial": "free_trial_7_days",
+    "freetrial7days": "free_trial_7_days",
+    "monthly": "monthly_499",
+    "monthly499": "monthly_499",
+    "1month": "monthly_499",
+    "1monthplan": "monthly_499",
+    "yearly": "yearly_4999_machine",
+    "annual": "yearly_4999_machine",
+    "yearly4999": "yearly_4999_machine",
+    "yearly4999machine": "yearly_4999_machine",
+    "1year": "yearly_4999_machine",
+    "1yearplan": "yearly_4999_machine",
+}
+
+
+def normalize_business_type(value):
+    if not value:
+        return "Others"
+
+    valid_business_types = {choice for choice, _ in BusinessProfile.BUSINESS_TYPES}
+    if value in valid_business_types:
+        return value
+
+    normalized = normalize_lookup_value(value)
+    return BUSINESS_TYPE_ALIASES.get(normalized, "Others")
+
+
+def normalize_plan_code(value):
+    normalized = normalize_lookup_value(value)
+    return PLAN_CODE_ALIASES.get(normalized, value)
+
+
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=6)
+    username = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True, default="")
+    password = serializers.CharField(write_only=True, min_length=6, required=False, allow_blank=True)
     phone = serializers.CharField(write_only=True)
+    owner_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     business_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     business_address = serializers.CharField(write_only=True, required=False, allow_blank=True)
     gstin = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -79,12 +148,62 @@ class RegisterSerializer(serializers.ModelSerializer):
             "email",
             "password",
             "phone",
+            "owner_name",
             "business_name",
             "business_address",
             "gstin",
             "plan_code",
             "business_type",
         )
+
+    def to_internal_value(self, data):
+        if hasattr(data, "copy"):
+            data = data.copy()
+        else:
+            data = dict(data)
+
+        phone = first_present(
+            data,
+            ("phone", "mobile", "mobile_number", "mobileNumber", "phone_number", "phoneNumber"),
+        )
+        if phone and not first_present(data, ("phone",)):
+            data["phone"] = phone
+
+        if not first_present(data, ("username",)) and phone:
+            data["username"] = normalize_local_phone_number(phone)
+
+        field_aliases = {
+            "owner_name": ("ownerName", "owner", "full_name", "fullName"),
+            "business_name": ("businessName", "shop_name", "shopName", "store_name", "storeName", "name"),
+            "business_address": ("businessAddress", "address", "shop_address", "shopAddress"),
+            "business_type": ("businessType", "shop_type", "shopType"),
+            "plan_code": ("planCode", "subscription_plan", "subscriptionPlan"),
+        }
+
+        for field, aliases in field_aliases.items():
+            if not first_present(data, (field,)):
+                value = first_present(data, aliases)
+                if value:
+                    data[field] = value
+
+        if first_present(data, ("business_type",)):
+            data["business_type"] = normalize_business_type(data["business_type"])
+
+        if first_present(data, ("plan_code",)):
+            data["plan_code"] = normalize_plan_code(data["plan_code"])
+
+        return super().to_internal_value(data)
+
+    def validate_username(self, value):
+        username = str(value or "").strip()
+
+        if not username:
+            return username
+
+        if User.objects.filter(username=username).exists():
+            raise serializers.ValidationError("This username is already registered.")
+
+        return username
 
     def validate_phone(self, value):
         phone = normalize_local_phone_number(value)
@@ -97,17 +216,49 @@ class RegisterSerializer(serializers.ModelSerializer):
 
         return phone
 
+    def validate_business_type(self, value):
+        business_type = normalize_business_type(value)
+        valid_business_types = {choice for choice, _ in BusinessProfile.BUSINESS_TYPES}
+
+        if business_type not in valid_business_types:
+            return "Others"
+
+        return business_type
+
+    def validate_plan_code(self, value):
+        return normalize_plan_code(str(value or "").strip())
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        if not attrs.get("username") and attrs.get("phone"):
+            attrs["username"] = attrs["phone"]
+
+        if not attrs.get("username"):
+            raise serializers.ValidationError({"username": "Username or phone number is required."})
+
+        if User.objects.filter(username=attrs["username"]).exists():
+            raise serializers.ValidationError({"username": "This username is already registered."})
+
+        return attrs
+
     @transaction.atomic
     def create(self, validated_data):
+        owner_name = validated_data.pop("owner_name", "")
         business_name = validated_data.pop("business_name", "")
         business_address = validated_data.pop("business_address", "")
         gstin = validated_data.pop("gstin", "")
         validated_data.pop("plan_code", "")
         business_type = validated_data.pop("business_type", "Others")
         phone = validated_data.pop("phone")
-        password = validated_data.pop("password")
+        password = validated_data.pop("password", "")
         user = User(**validated_data)
-        user.set_password(password)
+        if owner_name and not user.first_name:
+            user.first_name = owner_name
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
         user.save()
 
         business_profile = None

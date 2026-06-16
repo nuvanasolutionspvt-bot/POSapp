@@ -15,6 +15,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
+from django.db import transaction
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -506,6 +507,29 @@ def normalize_local_phone_digits(value):
     return digits
 
 
+def mask_phone_for_logs(value):
+    digits = normalize_local_phone_digits(value)
+    if len(digits) <= 4:
+        return "****" if digits else ""
+    return f"{'*' * (len(digits) - 4)}{digits[-4:]}"
+
+
+def sanitize_register_payload_for_logs(data):
+    if not hasattr(data, "items"):
+        return {}
+
+    sanitized = {}
+    for key, value in data.items():
+        if key == "password":
+            continue
+        if key == "phone":
+            sanitized[key] = mask_phone_for_logs(value)
+            continue
+        sanitized[key] = value
+
+    return sanitized
+
+
 def get_phone_lookup_candidates(phone):
     digits = normalize_phone_digits(phone)
     local_digits = normalize_local_phone_digits(phone)
@@ -663,32 +687,57 @@ class RegisterView(APIView):
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        selected_plan_code = serializer.validated_data.get("plan_code") or "free_trial_7_days"
-        selected_plan, selected_plan_data = get_app_subscription_plan(selected_plan_code)
-
-        if not selected_plan:
+        if not serializer.is_valid():
+            logger.warning(
+                "Registration validation failed. host=%s origin=%s errors=%s payload=%s",
+                request.get_host(),
+                request.headers.get("Origin", ""),
+                serializer.errors,
+                sanitize_register_payload_for_logs(request.data),
+            )
             return Response(
-                {"detail": "Invalid subscription plan."},
+                {
+                    **serializer.errors,
+                    "detail": "Registration request is invalid.",
+                    "errors": serializer.errors,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        user = serializer.save()
+        selected_plan_code = serializer.validated_data.get("plan_code") or "free_trial_7_days"
+
+        with transaction.atomic():
+            selected_plan, selected_plan_data = get_app_subscription_plan(selected_plan_code)
+
+            if not selected_plan:
+                logger.warning(
+                    "Registration rejected invalid subscription plan. host=%s plan_code=%s payload=%s",
+                    request.get_host(),
+                    selected_plan_code,
+                    sanitize_register_payload_for_logs(request.data),
+                )
+                return Response(
+                    {"detail": "Invalid subscription plan."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            user = serializer.save()
+            subscription = None
+
+            if user.profile.business_profile and selected_plan_data["trial"]:
+                subscription = activate_business_subscription(
+                    user.profile.business_profile,
+                    selected_plan,
+                    selected_plan_data,
+                    notes="Automatically created when the business registered.",
+                )
+
         refresh = RefreshToken.for_user(user)
         business_profile = serialize_business_profile(
             user.profile.business_profile,
             user=user,
             phone=user.profile.phone,
         )
-        subscription = None
-
-        if user.profile.business_profile and selected_plan_data["trial"]:
-            subscription = activate_business_subscription(
-                user.profile.business_profile,
-                selected_plan,
-                selected_plan_data,
-                notes="Automatically created when the business registered.",
-            )
 
         return Response(
             {
