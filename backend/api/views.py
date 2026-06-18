@@ -151,6 +151,205 @@ def build_simple_pdf(lines):
     return bytes(pdf)
 
 
+def build_pdf_document(page_contents, page_width=842, page_height=595):
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    ]
+    page_ids = []
+
+    for content in page_contents:
+        page_id = len(objects) + 1
+        content_id = page_id + 1
+        page_ids.append(page_id)
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_width} {page_height}] "
+            f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> "
+            f"/Contents {content_id} 0 R >>".encode("ascii"),
+        )
+        content_bytes = content.encode("latin-1", "replace")
+        objects.append(
+            b"<< /Length "
+            + str(len(content_bytes)).encode("ascii")
+            + b" >>\nstream\n"
+            + content_bytes
+            + b"\nendstream",
+        )
+
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects[1] = f"<< /Type /Pages /Kids [{kids}] /Count {len(page_ids)} >>".encode("ascii")
+
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{number} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+
+    pdf.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode(
+            "ascii",
+        ),
+    )
+    return bytes(pdf)
+
+
+def pdf_text(x, y, text, size=9, bold=False):
+    font = "F2" if bold else "F1"
+    return f"BT /{font} {size} Tf {x:.2f} {y:.2f} Td ({pdf_escape(text)}) Tj ET"
+
+
+def pdf_line(x1, y1, x2, y2, width=0.6):
+    return f"0 G {width:.2f} w {x1:.2f} {y1:.2f} m {x2:.2f} {y2:.2f} l S"
+
+
+def pdf_rect_fill(x, y, width, height, color=(1.0, 0.82, 0.36)):
+    red, green, blue = color
+    return f"{red:.2f} {green:.2f} {blue:.2f} rg {x:.2f} {y:.2f} {width:.2f} {height:.2f} re f"
+
+
+def truncate_pdf_cell(value, width, font_size=8):
+    text = str(value or "")
+    max_chars = max(3, int((width - 8) / (font_size * 0.52)))
+
+    if len(text) <= max_chars:
+        return text
+
+    return f"{text[:max_chars - 3]}..."
+
+
+def build_report_table_pdf(title, period_line, generated_line, tables, totals):
+    page_width = 842
+    page_height = 595
+    left = 34
+    top = 560
+    bottom = 42
+    row_height = 22
+    page_contents = []
+    commands = []
+    y = top
+
+    def start_page():
+        nonlocal commands, y
+        if commands:
+            page_contents.append("\n".join(commands))
+        commands = [
+            pdf_text(left, 564, title, size=15, bold=True),
+            pdf_text(left, 545, period_line, size=9),
+            pdf_text(left, 531, generated_line, size=9),
+        ]
+        y = 506
+
+    def ensure_space(required_height):
+        if y - required_height < bottom:
+            start_page()
+
+    def draw_table(section_title, columns, rows, min_rows=4):
+        nonlocal y
+        row_count = max(len(rows), min_rows)
+        total_width = sum(width for _, width, *_ in columns)
+        remaining_rows = row_count
+        row_index = 0
+        actual_rows = list(rows) + [None] * (row_count - len(rows))
+
+        while remaining_rows > 0:
+            ensure_space(58)
+            max_rows_on_page = max(1, int((y - bottom - row_height) / row_height))
+            rows_this_page = min(remaining_rows, max_rows_on_page)
+            table_top = y - 20
+            table_bottom = table_top - row_height * (rows_this_page + 1)
+
+            commands.append(pdf_text(left, y, section_title, size=11, bold=True))
+            commands.append(pdf_rect_fill(left, table_top - row_height, total_width, row_height))
+
+            x = left
+            commands.append(pdf_line(left, table_top, left + total_width, table_top))
+            for _, width, *_ in columns:
+                commands.append(pdf_line(x, table_top, x, table_bottom))
+                x += width
+            commands.append(pdf_line(left + total_width, table_top, left + total_width, table_bottom))
+
+            for line_index in range(rows_this_page + 2):
+                line_y = table_top - (line_index * row_height)
+                commands.append(pdf_line(left, line_y, left + total_width, line_y))
+
+            x = left
+            for label, width, *_ in columns:
+                commands.append(
+                    pdf_text(
+                        x + 5,
+                        table_top - 14,
+                        truncate_pdf_cell(label, width, 8),
+                        size=8,
+                        bold=True,
+                    ),
+                )
+                x += width
+
+            for local_index in range(rows_this_page):
+                row = actual_rows[row_index + local_index]
+                text_y = table_top - row_height * (local_index + 1) - 14
+                x = left
+
+                for column in columns:
+                    _, width, key, *options = column
+                    align_right = bool(options and options[0] == "right")
+                    value = "" if row is None else row.get(key, "")
+                    cell_text = truncate_pdf_cell(value, width, 8)
+                    text_x = x + 5
+
+                    if align_right:
+                        text_x = x + width - 5 - min(width - 10, len(cell_text) * 4.2)
+
+                    commands.append(pdf_text(text_x, text_y, cell_text, size=8))
+                    x += width
+
+            y = table_bottom - 24
+            row_index += rows_this_page
+            remaining_rows -= rows_this_page
+
+            if remaining_rows > 0:
+                start_page()
+
+    start_page()
+
+    for table in tables:
+        draw_table(
+            table["title"],
+            table["columns"],
+            table["rows"],
+            table.get("min_rows", 4),
+        )
+
+    ensure_space(120)
+    total_columns = (
+        ("Description", 260, "label"),
+        ("Amount", 140, "value", "right"),
+    )
+    draw_table(
+        "Totals",
+        total_columns,
+        [{"label": label, "value": value} for label, value in totals],
+        min_rows=len(totals),
+    )
+
+    if commands:
+        page_contents.append("\n".join(commands))
+
+    return build_pdf_document(page_contents, page_width=page_width, page_height=page_height)
+
+
 def build_receipt_pdf(lines):
     page_width = 226
     line_height = 12
@@ -1982,77 +2181,72 @@ def reports_download(request):
     remaining_total = bills.aggregate(total=Sum("remaining_amount"))["total"] or 0
     credit_bills = bills.filter(payment_mode="Credit")
     non_credit_bills = bills.exclude(payment_mode="Credit")
-    normal_widths = (14, 30, 12, 12)
-    credit_widths = (14, 24, 12, 10, 10, 10)
+    paid_rows = []
+    credit_rows = []
 
-    lines = [
+    for bill in non_credit_bills.order_by("created_at", "id"):
+        paid_rows.append(
+            {
+                "invoice": bill.invoice_id,
+                "item": report_bill_items(bill),
+                "date": timezone.localtime(bill.created_at).strftime("%d %b %Y"),
+                "total": money(bill.grand_total),
+            },
+        )
+
+    for bill in credit_bills.order_by("created_at", "id"):
+        credit_rows.append(
+            {
+                "invoice": bill.invoice_id,
+                "item": report_bill_items(bill),
+                "date": timezone.localtime(bill.created_at).strftime("%d %b %Y"),
+                "total": money(bill.grand_total),
+                "paid": money(bill.paid_amount),
+                "remaining": money(bill.remaining_amount),
+            },
+        )
+
+    tables = [
+        {
+            "title": "Paid Bills",
+            "columns": (
+                ("Invoice No", 120, "invoice"),
+                ("Item", 360, "item"),
+                ("Date", 110, "date"),
+                ("Total Amount", 140, "total", "right"),
+            ),
+            "rows": paid_rows,
+            "min_rows": 4,
+        },
+        {
+            "title": "Credit Bills",
+            "columns": (
+                ("Invoice No", 110, "invoice"),
+                ("Item", 260, "item"),
+                ("Date", 100, "date"),
+                ("Total Amount", 100, "total", "right"),
+                ("Paid Amount", 95, "paid", "right"),
+                ("Remaining Amount", 95, "remaining", "right"),
+            ),
+            "rows": credit_rows,
+            "min_rows": 4,
+        },
+    ]
+    totals = [
+        ("Total bills", str(bills.count())),
+        ("Total amount", money(total_sales)),
+        ("Paid amount", money(paid_total)),
+        ("Remaining amount", money(remaining_total)),
+    ]
+    pdf = build_report_table_pdf(
         f"{business.name} {label} Sales Report",
         f"Period: {start_day:%d %b %Y} to {end_day:%d %b %Y}",
         f"Generated: {timezone.localtime():%d %b %Y, %I:%M %p}",
-        "",
-        "Paid Bills",
-        report_table_row(("Invoice No", "Item", "Date", "Total Amount"), normal_widths),
-        "-" * 71,
-    ]
-
-    if non_credit_bills.exists():
-        for bill in non_credit_bills.order_by("created_at", "id"):
-            lines.append(
-                report_table_row(
-                    (
-                        bill.invoice_id,
-                        report_bill_items(bill),
-                        timezone.localtime(bill.created_at).strftime("%d %b %Y"),
-                        report_money(bill.grand_total),
-                    ),
-                    normal_widths,
-                ),
-            )
-    else:
-        lines.append("No paid bills found.")
-
-    lines.extend(
-        [
-            "",
-            "Credit Bills",
-            report_table_row(
-                ("Invoice No", "Item", "Date", "Total", "Paid", "Remaining"),
-                credit_widths,
-            ),
-            "-" * 85,
-        ],
-    )
-
-    if credit_bills.exists():
-        for bill in credit_bills.order_by("created_at", "id"):
-            lines.append(
-                report_table_row(
-                    (
-                        bill.invoice_id,
-                        report_bill_items(bill),
-                        timezone.localtime(bill.created_at).strftime("%d %b %Y"),
-                        report_money(bill.grand_total),
-                        report_money(bill.paid_amount),
-                        report_money(bill.remaining_amount),
-                    ),
-                    credit_widths,
-                ),
-            )
-    else:
-        lines.append("No credit bills found.")
-
-    lines.extend(
-        [
-            "",
-            "Totals",
-            f"Total bills: {bills.count()}",
-            f"Total amount: {money(total_sales)}",
-            f"Paid amount: {money(paid_total)}",
-            f"Remaining amount: {money(remaining_total)}",
-        ],
+        tables,
+        totals,
     )
 
     filename = f"{period}-sales-report-{end_day:%Y-%m-%d}.pdf"
-    response = HttpResponse(build_simple_pdf(lines), content_type="application/pdf")
+    response = HttpResponse(pdf, content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
