@@ -211,6 +211,26 @@ def receipt_pair(left, right, width=32):
     return f"{left[:available].ljust(available)}{right}"[:width]
 
 
+def report_cell(value, width):
+    return str(value or "")[:width].ljust(width)
+
+
+def report_money(value):
+    return f"{Decimal(value or 0):.2f}"
+
+
+def report_bill_items(bill):
+    items = [str(item.name) for item in bill.items.all()]
+    return ", ".join(items) if items else "-"
+
+
+def report_table_row(values, widths):
+    return " ".join(
+        report_cell(value, width)
+        for value, width in zip(values, widths)
+    )
+
+
 def build_bill_pdf_lines(bill):
     business = bill.business
     created_at = timezone.localtime(bill.created_at)
@@ -1952,58 +1972,85 @@ def reports_download(request):
 
     period = normalize_report_period(request)
     start_day, end_day, start_at, end_at, label = get_report_period_range(period)
-    bills = Bill.objects.filter(
+    bills = Bill.objects.prefetch_related("items").filter(
         business=business,
         created_at__gte=start_at,
         created_at__lt=end_at,
     )
-    bill_ids = bills.values_list("id", flat=True)
     total_sales = bills.aggregate(total=Sum("grand_total"))["total"] or 0
-    item_total = ExpressionWrapper(
-        F("price") * F("quantity"),
-        output_field=DecimalField(max_digits=12, decimal_places=2),
-    )
-    payment_breakdown = bills.values("payment_mode").annotate(
-        count=Count("id"),
-        total=Sum("grand_total"),
-    )
-    top_products = (
-        BillItem.objects.filter(bill_id__in=bill_ids)
-        .values("name")
-        .annotate(
-            sold_quantity=Sum("quantity"),
-            total=Sum(item_total),
-        )
-        .order_by("-sold_quantity")[:10]
-    )
+    paid_total = bills.aggregate(total=Sum("paid_amount"))["total"] or 0
+    remaining_total = bills.aggregate(total=Sum("remaining_amount"))["total"] or 0
+    credit_bills = bills.filter(payment_mode="Credit")
+    non_credit_bills = bills.exclude(payment_mode="Credit")
+    normal_widths = (14, 30, 12, 12)
+    credit_widths = (14, 24, 12, 10, 10, 10)
 
     lines = [
         f"{business.name} {label} Sales Report",
         f"Period: {start_day:%d %b %Y} to {end_day:%d %b %Y}",
         f"Generated: {timezone.localtime():%d %b %Y, %I:%M %p}",
         "",
-        "Summary",
-        f"Total sales: {money(total_sales)}",
-        f"Total bills: {bills.count()}",
-        "",
-        "Payment breakdown",
+        "Paid Bills",
+        report_table_row(("Invoice No", "Item", "Date", "Total Amount"), normal_widths),
+        "-" * 71,
     ]
 
-    if payment_breakdown:
-        for item in payment_breakdown:
+    if non_credit_bills.exists():
+        for bill in non_credit_bills.order_by("created_at", "id"):
             lines.append(
-                f"{item['payment_mode']}: {item['count']} bills, {money(item['total'])}",
+                report_table_row(
+                    (
+                        bill.invoice_id,
+                        report_bill_items(bill),
+                        timezone.localtime(bill.created_at).strftime("%d %b %Y"),
+                        report_money(bill.grand_total),
+                    ),
+                    normal_widths,
+                ),
             )
     else:
-        lines.append("No payments found for this period.")
+        lines.append("No paid bills found.")
 
-    lines.extend(["", "Top selling products"])
+    lines.extend(
+        [
+            "",
+            "Credit Bills",
+            report_table_row(
+                ("Invoice No", "Item", "Date", "Total", "Paid", "Remaining"),
+                credit_widths,
+            ),
+            "-" * 85,
+        ],
+    )
 
-    if top_products:
-        for index, item in enumerate(top_products, start=1):
-            lines.append(f"{index}. {item['name']} - Qty {item['sold_quantity']}")
+    if credit_bills.exists():
+        for bill in credit_bills.order_by("created_at", "id"):
+            lines.append(
+                report_table_row(
+                    (
+                        bill.invoice_id,
+                        report_bill_items(bill),
+                        timezone.localtime(bill.created_at).strftime("%d %b %Y"),
+                        report_money(bill.grand_total),
+                        report_money(bill.paid_amount),
+                        report_money(bill.remaining_amount),
+                    ),
+                    credit_widths,
+                ),
+            )
     else:
-        lines.append("No products sold for this period.")
+        lines.append("No credit bills found.")
+
+    lines.extend(
+        [
+            "",
+            "Totals",
+            f"Total bills: {bills.count()}",
+            f"Total amount: {money(total_sales)}",
+            f"Paid amount: {money(paid_total)}",
+            f"Remaining amount: {money(remaining_total)}",
+        ],
+    )
 
     filename = f"{period}-sales-report-{end_day:%Y-%m-%d}.pdf"
     response = HttpResponse(build_simple_pdf(lines), content_type="application/pdf")

@@ -10,6 +10,7 @@ from rest_framework.test import APITestCase
 
 from .models import (
     Bill,
+    BillItem,
     BusinessProfile,
     BusinessSubscription,
     CreditCustomer,
@@ -412,6 +413,78 @@ class BillViewSetTests(APITestCase):
                 self.assertEqual(response.status_code, 201, response.data)
                 self.assertEqual(response.data["paymentMode"], payment_mode)
                 self.assertEqual(response.data["items"][0]["quantity"], "1.500")
+
+
+class ReportsDownloadTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="report-user", password="Password123")
+        self.business = BusinessProfile.objects.create(
+            name="Report Store",
+            business_type="Kirana shop",
+            phone="9876543240",
+        )
+        UserProfile.objects.create(
+            user=self.user,
+            phone="9876543240",
+            business_profile=self.business,
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def test_daily_report_pdf_contains_bill_tables_and_totals(self):
+        credit_customer = CreditCustomer.objects.create(
+            business=self.business,
+            name="Credit Buyer",
+            current_balance=Decimal("50.00"),
+        )
+        cash_bill = Bill.objects.create(
+            business=self.business,
+            invoice_id="INV-CASH",
+            payment_mode="Cash",
+            subtotal=Decimal("100.00"),
+            grand_total=Decimal("100.00"),
+        )
+        BillItem.objects.create(
+            bill=cash_bill,
+            name="Sugar",
+            price=Decimal("100.00"),
+            quantity=Decimal("1.000"),
+        )
+        credit_bill = Bill.objects.create(
+            business=self.business,
+            invoice_id="INV-CREDIT",
+            payment_mode="Credit",
+            credit_customer=credit_customer,
+            subtotal=Decimal("200.00"),
+            grand_total=Decimal("200.00"),
+            paid_amount=Decimal("150.00"),
+            remaining_amount=Decimal("50.00"),
+            previous_balance=Decimal("0.00"),
+            total_balance=Decimal("50.00"),
+            is_paid=False,
+        )
+        BillItem.objects.create(
+            bill=credit_bill,
+            name="Rice",
+            price=Decimal("200.00"),
+            quantity=Decimal("1.000"),
+        )
+
+        response = self.client.get("/api/reports/download/?period=daily")
+        content = response.content.decode("latin-1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Invoice No", content)
+        self.assertIn("Total Amount", content)
+        self.assertIn("Paid", content)
+        self.assertIn("Remaining", content)
+        self.assertIn("INV-CASH", content)
+        self.assertIn("Sugar", content)
+        self.assertIn("INV-CREDIT", content)
+        self.assertIn("Rice", content)
+        self.assertIn("Total bills: 2", content)
+        self.assertIn("Total amount: Rs. 300.00", content)
+        self.assertIn("Paid amount: Rs. 150.00", content)
+        self.assertIn("Remaining amount: Rs. 50.00", content)
 
 
 class RegisterViewTests(APITestCase):
