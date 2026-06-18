@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>New Registration | NuvaBill</title>
+  <style>
+    :root {
+      --primary: #02066F;
+      --primary-soft: #eef0ff;
+      --bg: #f5f6fb;
+      --card: #ffffff;
+      --line: #d9deea;
+      --text: #111827;
+      --muted: #667085;
+      --danger: #b42318;
+      --success: #067647;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      background: var(--primary);
+      color: #fff;
+      padding: 24px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 26px;
+      border-bottom: 1px solid rgba(255,255,255,.18);
+      margin-bottom: 22px;
+    }
+
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: #fff;
+      color: var(--primary);
+      font-weight: 900;
+    }
+
+    .brand-title { font-size: 18px; font-weight: 800; }
+    .brand-subtitle { font-size: 12px; color: rgba(255,255,255,.72); margin-top: 2px; }
+
+    .nav-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: rgba(255,255,255,.58);
+      margin: 18px 10px 8px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: rgba(255,255,255,.82);
+      padding: 12px 10px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .nav-item.active,
+    .nav-item:hover {
+      background: rgba(255,255,255,.14);
+      color: #fff;
+    }
+
+    .nav-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .main {
+      padding: 28px;
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    h1, h2, p { margin: 0; }
+    h1 { font-size: 28px; }
+    .muted { color: var(--muted); font-size: 13px; margin-top: 5px; }
+
+    .date-pill {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: var(--primary);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .panel {
+      max-width: 980px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 10px 24px rgba(17,24,39,.06);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-header h2 { font-size: 18px; }
+    .panel-body { padding: 18px; }
+
+    form { display: grid; gap: 16px; }
+    .form-section {
+      display: grid;
+      gap: 12px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .form-section:last-of-type { border-bottom: 0; padding-bottom: 0; }
+    .form-section h2 { font-size: 15px; color: var(--primary); }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #344054;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 11px 12px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+
+    textarea { min-height: 78px; resize: vertical; }
+
+    .error {
+      border: 1px solid #fecdca;
+      background: #fffbfa;
+      color: var(--danger);
+      border-radius: 10px;
+      padding: 11px 12px;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      padding-top: 4px;
+    }
+
+    button,
+    .button-secondary {
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-weight: 900;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    button { background: var(--primary); color: #fff; }
+    .button-secondary { background: var(--primary-soft); color: var(--primary); }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .topbar { flex-direction: column; }
+      .form-grid { grid-template-columns: 1fr; }
+      .actions { align-items: stretch; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">NB</div>
+        <div>
+          <div class="brand-title">NuvaBill</div>
+          <div class="brand-subtitle">Subscription Control</div>
+        </div>
+      </div>
+
+      <div class="nav-title">Dashboard</div>
+      <a class="nav-item" href="{% url 'subscription-admin-root' %}"><span class="nav-dot"></span> Overview</a>
+      <a class="nav-item active" href="{% url 'subscription-admin-register-business' %}"><span class="nav-dot"></span> New Registration</a>
+      <a class="nav-item" href="{% url 'subscription-admin-root' %}#plans"><span class="nav-dot"></span> Plans</a>
+      <a class="nav-item" href="{% url 'subscription-admin-root' %}#assign"><span class="nav-dot"></span> Assign Subscription</a>
+      <a class="nav-item" href="{% url 'subscription-admin-businesses' %}"><span class="nav-dot"></span> Businesses</a>
+
+      <div class="nav-title">App Flow</div>
+      <a class="nav-item" href="{% url 'subscription-admin-register-business' %}"><span class="nav-dot"></span> Refresh Page</a>
+      <a class="nav-item" href="{% url 'subscription-admin-logout-root' %}"><span class="nav-dot"></span> Logout</a>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>New Registration</h1>
+          <p class="muted">Create the customer account, business profile, and subscription from the admin panel.</p>
+        </div>
+        <div class="date-pill">{{ today }}</div>
+      </header>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Register Business For Customer</h2>
+          <p class="muted">After saving, the customer can log in from the app using this phone number.</p>
+        </div>
+        <div class="panel-body">
+          {% if error %}
+            <div class="error">{{ error }}</div>
+          {% endif %}
+
+          <form method="post">
+            {% csrf_token %}
+
+            <div class="form-section">
+              <h2>Owner Details</h2>
+              <div class="form-grid">
+                <label>Owner name
+                  <input name="owner_name" value="{{ form_data.owner_name }}" required>
+                </label>
+                <label>Phone number
+                  <input name="phone" value="{{ form_data.phone }}" inputmode="numeric" required>
+                </label>
+                <label>Email
+                  <input name="email" type="email" value="{{ form_data.email }}">
+                </label>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h2>Business Details</h2>
+              <div class="form-grid">
+                <label>Business name
+                  <input name="business_name" value="{{ form_data.business_name }}" required>
+                </label>
+                <label>Business type
+                  <select name="business_type">
+                    {% for value,label in business_types %}
+                      <option value="{{ value }}" {% if value == form_data.business_type %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>GSTIN
+                  <input name="gstin" value="{{ form_data.gstin }}">
+                </label>
+                <label>Address
+                  <input name="business_address" value="{{ form_data.business_address }}">
+                </label>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h2>Subscription</h2>
+              {% if plans %}
+                <div class="form-grid">
+                  <label>Plan
+                    <select name="plan" required>
+                      {% for plan in plans %}
+                        <option value="{{ plan.id }}" {% if plan.id|stringformat:"s" == form_data.plan %}selected{% endif %}>{{ plan.name }} - Rs. {{ plan.price }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label>Status
+                    <select name="status" required>
+                      {% for value,label in statuses %}
+                        <option value="{{ value }}" {% if value == form_data.status %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label>Start date
+                    <input name="starts_at" type="date" value="{{ form_data.starts_at }}" required>
+                  </label>
+                  <label>Expire date
+                    <input name="ends_at" type="date" value="{{ form_data.ends_at }}" required>
+                  </label>
+                  <label>Trial ends
+                    <input name="trial_ends_at" type="date" value="{{ form_data.trial_ends_at }}">
+                  </label>
+                  <label>Seats
+                    <input name="seats" type="number" min="1" value="{{ form_data.seats }}" required>
+                  </label>
+                </div>
+                <label>Notes
+                  <textarea name="notes">{{ form_data.notes }}</textarea>
+                </label>
+              {% else %}
+                <p class="hint">Create an active subscription plan first, then register the business.</p>
+              {% endif %}
+            </div>
+
+            <div class="actions">
+              <a class="button-secondary" href="{% url 'subscription-admin-businesses' %}">Cancel</a>
+              <button type="submit" {% if not plans %}disabled{% endif %}>Create Registration</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -22,6 +22,7 @@ from api.views import (
     subscription_admin_businesses,
     subscription_admin_logout,
     subscription_admin_panel,
+    subscription_admin_register_business,
     subscription_owner_login,
 )
 from drf_yasg import openapi
@@ -41,6 +42,11 @@ schema_view = get_schema_view(
 urlpatterns = [
     path("subscription-admin/login/", subscription_owner_login, name="subscription-owner-login"),
     path("subscription-admin/", subscription_admin_panel, name="subscription-admin-root"),
+    path(
+        "subscription-admin/register/",
+        subscription_admin_register_business,
+        name="subscription-admin-register-business",
+    ),
     path(
         "subscription-admin/businesses/",
         subscription_admin_businesses,

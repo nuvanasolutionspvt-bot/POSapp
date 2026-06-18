@@ -759,6 +759,85 @@ class SubscriptionAdminBusinessTests(TestCase):
         self.assertEqual(subscription.trial_ends_at, extended_end)
         self.assertEqual(subscription.notes, "Extended for friend trial.")
 
+    def test_new_registration_page_creates_login_ready_business(self):
+        plan = SubscriptionPlan.objects.get(code="free_trial_7_days")
+
+        response = self.client.get(reverse("subscription-admin-register-business"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "New Registration")
+        self.assertContains(response, "Create Registration")
+
+        today = timezone.localdate()
+        ends_at = today + timedelta(days=14)
+        response = self.client.post(
+            reverse("subscription-admin-register-business"),
+            {
+                "owner_name": "Admin Created Owner",
+                "phone": "+91 98765 43333",
+                "email": "admin-created@example.com",
+                "business_name": "Admin Created Store",
+                "business_type": "Kirana shop",
+                "business_address": "Admin address",
+                "gstin": "27ABCDE1234F1Z6",
+                "plan": str(plan.id),
+                "status": "trial",
+                "starts_at": f"{today:%Y-%m-%d}",
+                "ends_at": f"{ends_at:%Y-%m-%d}",
+                "trial_ends_at": f"{ends_at:%Y-%m-%d}",
+                "seats": "1",
+                "notes": "Created for customer from admin.",
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("subscription-admin-businesses"),
+            fetch_redirect_response=False,
+        )
+
+        profile = UserProfile.objects.select_related("user", "business_profile").get(
+            phone="9876543333",
+        )
+        self.assertEqual(profile.user.username, "9876543333")
+        self.assertFalse(profile.user.has_usable_password())
+        self.assertEqual(profile.business_profile.name, "Admin Created Store")
+        self.assertEqual(profile.business_profile.business_type, "Kirana shop")
+
+        subscription = BusinessSubscription.objects.get(business=profile.business_profile)
+        self.assertEqual(subscription.plan, plan)
+        self.assertEqual(subscription.status, "trial")
+        self.assertEqual(subscription.ends_at, ends_at)
+        self.assertEqual(subscription.trial_ends_at, ends_at)
+
+    def test_new_registration_rejects_duplicate_phone(self):
+        UserProfile.objects.create(
+            user=User.objects.create_user(username="9876543222"),
+            phone="9876543222",
+        )
+        plan = SubscriptionPlan.objects.get(code="free_trial_7_days")
+        today = timezone.localdate()
+
+        response = self.client.post(
+            reverse("subscription-admin-register-business"),
+            {
+                "owner_name": "Duplicate Owner",
+                "phone": "9876543222",
+                "business_name": "Duplicate Store",
+                "business_type": "Others",
+                "plan": str(plan.id),
+                "status": "trial",
+                "starts_at": f"{today:%Y-%m-%d}",
+                "ends_at": f"{today + timedelta(days=7):%Y-%m-%d}",
+                "trial_ends_at": f"{today + timedelta(days=7):%Y-%m-%d}",
+                "seats": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This phone number is already registered.")
+        self.assertFalse(BusinessProfile.objects.filter(name="Duplicate Store").exists())
+
 
 class LegalAndAccountTests(APITestCase):
     def test_app_update_check_returns_update_available(self):

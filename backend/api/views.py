@@ -1560,6 +1560,112 @@ def subscription_admin_businesses(request):
     )
 
 
+@owner_session_required
+@require_http_methods(["GET", "POST"])
+def subscription_admin_register_business(request):
+    today = timezone.localdate()
+    plans = SubscriptionPlan.objects.filter(is_active=True)
+    business_types = BusinessProfile.BUSINESS_TYPES
+    default_plan = plans.filter(code="free_trial_7_days").first() or plans.first()
+    default_end_date = today + timedelta(days=7)
+    error = ""
+    form_data = {
+        "starts_at": f"{today:%Y-%m-%d}",
+        "ends_at": f"{default_end_date:%Y-%m-%d}",
+        "trial_ends_at": f"{default_end_date:%Y-%m-%d}",
+        "status": "trial",
+        "seats": "1",
+    }
+
+    if default_plan:
+        form_data["plan"] = str(default_plan.id)
+
+    if request.method == "POST":
+        form_data.update(request.POST.dict())
+        phone = normalize_local_phone_digits(request.POST.get("phone"))
+        owner_name = request.POST.get("owner_name", "").strip()
+        business_name = request.POST.get("business_name", "").strip()
+        email = request.POST.get("email", "").strip()
+        business_type = request.POST.get("business_type", "Others")
+        business_address = request.POST.get("business_address", "").strip()
+        gstin = request.POST.get("gstin", "").strip()
+        plan = plans.filter(id=request.POST.get("plan")).first()
+        status_value = request.POST.get("status", "trial")
+        starts_at = parse_date(request.POST.get("starts_at")) or today
+        ends_at = parse_date(request.POST.get("ends_at")) or default_end_date
+        trial_ends_at = parse_date(request.POST.get("trial_ends_at"))
+        seats = request.POST.get("seats") or 1
+        notes = request.POST.get("notes", "").strip()
+        valid_business_types = {value for value, _ in business_types}
+        valid_statuses = {value for value, _ in BusinessSubscription.STATUSES}
+
+        if len(phone) != 10:
+            error = "Enter a valid 10 digit phone number."
+        elif not business_name:
+            error = "Business name is required."
+        elif not owner_name:
+            error = "Owner name is required."
+        elif UserProfile.objects.filter(phone=phone).exists():
+            error = "This phone number is already registered."
+        elif User.objects.filter(username=phone).exists():
+            error = "A user already exists with this phone number."
+        elif not plan:
+            error = "Select an active subscription plan."
+        elif status_value not in valid_statuses:
+            error = "Select a valid subscription status."
+        else:
+            if business_type not in valid_business_types:
+                business_type = "Others"
+
+            with transaction.atomic():
+                user = User(
+                    username=phone,
+                    email=email,
+                    first_name=owner_name,
+                )
+                user.set_unusable_password()
+                user.save()
+
+                business = BusinessProfile.objects.create(
+                    name=business_name,
+                    business_type=business_type,
+                    phone=phone,
+                    email=email,
+                    address=business_address,
+                    gstin=gstin,
+                )
+                UserProfile.objects.create(
+                    user=user,
+                    phone=phone,
+                    business_profile=business,
+                )
+                BusinessSubscription.objects.create(
+                    business=business,
+                    plan=plan,
+                    status=status_value,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                    trial_ends_at=trial_ends_at,
+                    seats=seats,
+                    notes=notes or "Created from subscription admin New Registration page.",
+                )
+
+            return redirect("subscription-admin-businesses")
+
+    return render(
+        request,
+        "api/subscription_admin_register.html",
+        {
+            "business_types": business_types,
+            "error": error,
+            "form_data": form_data,
+            "plans": plans,
+            "statuses": BusinessSubscription.STATUSES,
+            "today": today,
+        },
+    )
+
+
 def subscription_admin_logout(request):
     logout(request)
     request.session.flush()
