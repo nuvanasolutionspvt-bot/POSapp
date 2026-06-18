@@ -336,11 +336,29 @@ class Customer(TimeStampedModel):
         return self.full_name
 
 
+class CreditCustomer(TimeStampedModel):
+    business = models.ForeignKey(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        related_name="credit_customers",
+    )
+    name = models.CharField(max_length=150)
+    phone = models.CharField(max_length=20, blank=True)
+    current_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+
 class Bill(TimeStampedModel):
     PAYMENT_MODES = (
         ("Cash", "Cash"),
         ("UPI", "UPI"),
         ("Card", "Card"),
+        ("Credit", "Credit"),
     )
 
     business = models.ForeignKey(
@@ -364,6 +382,17 @@ class Bill(TimeStampedModel):
     tax = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     grand_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     is_paid = models.BooleanField(default=True)
+    credit_customer = models.ForeignKey(
+        CreditCustomer,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bills",
+    )
+    paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    remaining_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    previous_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     class Meta:
         ordering = ("-created_at",)
@@ -378,6 +407,34 @@ class Bill(TimeStampedModel):
         return self.invoice_id
 
 
+class CreditPayment(TimeStampedModel):
+    business = models.ForeignKey(
+        BusinessProfile,
+        on_delete=models.CASCADE,
+        related_name="credit_payments",
+    )
+    customer = models.ForeignKey(
+        CreditCustomer,
+        on_delete=models.CASCADE,
+        related_name="payments",
+    )
+    bill = models.ForeignKey(
+        Bill,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="credit_payments",
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.customer} paid {self.amount}"
+
+
 class BillItem(TimeStampedModel):
     bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name="items")
     product = models.ForeignKey(
@@ -389,7 +446,7 @@ class BillItem(TimeStampedModel):
     )
     name = models.CharField(max_length=180)
     price = models.DecimalField(max_digits=10, decimal_places=2)
-    quantity = models.PositiveIntegerField(default=1)
+    quantity = models.DecimalField(max_digits=10, decimal_places=3, default=1)
     image_url = models.TextField(blank=True)
 
     @property

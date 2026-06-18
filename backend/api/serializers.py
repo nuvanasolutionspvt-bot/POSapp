@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import transaction
+from decimal import Decimal
 from rest_framework import serializers
 
 from .models import (
@@ -9,6 +10,8 @@ from .models import (
     BusinessProfile,
     BusinessSubscription,
     Category,
+    CreditCustomer,
+    CreditPayment,
     Customer,
     Product,
     SubscriptionPlan,
@@ -422,6 +425,82 @@ class CustomerSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class CreditCustomerSerializer(serializers.ModelSerializer):
+    business = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = CreditCustomer
+        fields = (
+            "id",
+            "business",
+            "name",
+            "phone",
+            "current_balance",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("current_balance", "created_at", "updated_at")
+
+
+class CreditPaymentSerializer(serializers.ModelSerializer):
+    business = serializers.PrimaryKeyRelatedField(read_only=True)
+    customer_name = serializers.CharField(source="customer.name", read_only=True)
+    customer_phone = serializers.CharField(source="customer.phone", read_only=True)
+
+    class Meta:
+        model = CreditPayment
+        fields = (
+            "id",
+            "business",
+            "customer",
+            "customer_name",
+            "customer_phone",
+            "bill",
+            "amount",
+            "note",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")
+
+    def validate_customer(self, value):
+        request = self.context.get("request")
+        business = getattr(getattr(request, "user", None), "profile", None)
+        business_profile = getattr(business, "business_profile", None)
+
+        if value and business_profile and value.business_id != business_profile.id:
+            raise serializers.ValidationError("Select a credit customer from your business.")
+
+        return value
+
+    def validate_bill(self, value):
+        request = self.context.get("request")
+        business = getattr(getattr(request, "user", None), "profile", None)
+        business_profile = getattr(business, "business_profile", None)
+
+        if value and business_profile and value.business_id != business_profile.id:
+            raise serializers.ValidationError("Select a bill from your business.")
+
+        return value
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Payment amount must be greater than zero.")
+
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        payment = CreditPayment.objects.create(**validated_data)
+        customer = payment.customer
+        customer.current_balance = max(
+            Decimal("0.00"),
+            Decimal(customer.current_balance) - Decimal(payment.amount),
+        )
+        customer.save(update_fields=("current_balance", "updated_at"))
+        return payment
+
+
 class BillItemSerializer(serializers.ModelSerializer):
     image = serializers.CharField(source="image_url", required=False, allow_blank=True)
     line_total = serializers.DecimalField(
@@ -467,6 +546,38 @@ class BillSerializer(serializers.ModelSerializer):
         decimal_places=2,
     )
     isPaid = serializers.BooleanField(source="is_paid", required=False)
+    creditCustomer = serializers.PrimaryKeyRelatedField(
+        source="credit_customer",
+        queryset=CreditCustomer.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    creditCustomerName = serializers.CharField(source="credit_customer.name", read_only=True)
+    creditCustomerPhone = serializers.CharField(source="credit_customer.phone", read_only=True)
+    paidAmount = serializers.DecimalField(
+        source="paid_amount",
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+    )
+    remainingAmount = serializers.DecimalField(
+        source="remaining_amount",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
+    previousBalance = serializers.DecimalField(
+        source="previous_balance",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
+    totalBalance = serializers.DecimalField(
+        source="total_balance",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
 
     class Meta:
         model = Bill
@@ -482,6 +593,13 @@ class BillSerializer(serializers.ModelSerializer):
             "tax",
             "grandTotal",
             "isPaid",
+            "creditCustomer",
+            "creditCustomerName",
+            "creditCustomerPhone",
+            "paidAmount",
+            "remainingAmount",
+            "previousBalance",
+            "totalBalance",
             "created_at",
             "updated_at",
         )
@@ -497,20 +615,94 @@ class BillSerializer(serializers.ModelSerializer):
 
         return value
 
+    def validate_creditCustomer(self, value):
+        request = self.context.get("request")
+        business = getattr(getattr(request, "user", None), "profile", None)
+        business_profile = getattr(business, "business_profile", None)
+
+        if value and business_profile and value.business_id != business_profile.id:
+            raise serializers.ValidationError("Select a credit customer from your business.")
+
+        return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        payment_mode = attrs.get("payment_mode", getattr(self.instance, "payment_mode", "Cash"))
+        credit_customer = attrs.get(
+            "credit_customer",
+            getattr(self.instance, "credit_customer", None),
+        )
+        grand_total = attrs.get("grand_total", getattr(self.instance, "grand_total", 0))
+        paid_amount = attrs.get("paid_amount", getattr(self.instance, "paid_amount", 0))
+
+        if paid_amount is not None and paid_amount < 0:
+            raise serializers.ValidationError({"paidAmount": "Paid amount cannot be negative."})
+
+        if payment_mode == "Credit":
+            if not credit_customer:
+                raise serializers.ValidationError(
+                    {"creditCustomer": "Credit customer is required for credit bills."},
+                )
+            if Decimal(paid_amount or 0) > Decimal(grand_total or 0):
+                raise serializers.ValidationError(
+                    {"paidAmount": "Paid amount cannot be greater than bill total."},
+                )
+
+        return attrs
+
+    def apply_credit_balance(self, bill, old_credit_customer=None, old_remaining_amount=Decimal("0.00")):
+        if old_credit_customer:
+            old_credit_customer.current_balance = max(
+                Decimal("0.00"),
+                Decimal(old_credit_customer.current_balance) - Decimal(old_remaining_amount or 0),
+            )
+            old_credit_customer.save(update_fields=("current_balance", "updated_at"))
+
+        if bill.payment_mode != "Credit":
+            bill.credit_customer = None
+            bill.paid_amount = Decimal("0.00")
+            bill.remaining_amount = Decimal("0.00")
+            bill.previous_balance = Decimal("0.00")
+            bill.total_balance = Decimal("0.00")
+            bill.is_paid = True
+            return
+
+        remaining_amount = max(
+            Decimal("0.00"),
+            Decimal(bill.grand_total or 0) - Decimal(bill.paid_amount or 0),
+        )
+        previous_balance = Decimal(bill.credit_customer.current_balance)
+        total_balance = previous_balance + remaining_amount
+
+        bill.remaining_amount = remaining_amount
+        bill.previous_balance = previous_balance
+        bill.total_balance = total_balance
+        bill.is_paid = remaining_amount <= 0
+
+        bill.credit_customer.current_balance = total_balance
+        bill.credit_customer.save(update_fields=("current_balance", "updated_at"))
+
+    @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop("items", [])
-        bill = Bill.objects.create(**validated_data)
+        bill = Bill(**validated_data)
+        self.apply_credit_balance(bill)
+        bill.save()
 
         for item_data in items_data:
             BillItem.objects.create(bill=bill, **item_data)
 
         return bill
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         items_data = validated_data.pop("items", None)
+        old_credit_customer = instance.credit_customer if instance.payment_mode == "Credit" else None
+        old_remaining_amount = instance.remaining_amount
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        self.apply_credit_balance(instance, old_credit_customer, old_remaining_amount)
         instance.save()
 
         if items_data is not None:

@@ -6,6 +6,8 @@ from .views import (
     BillViewSet,
     BusinessProfileViewSet,
     CategoryViewSet,
+    CreditCustomerViewSet,
+    CreditPaymentViewSet,
     CustomerViewSet,
     FirebaseLoginView,
     OTPRequestView,
@@ -39,6 +41,8 @@ router.register("business-profiles", BusinessProfileViewSet, basename="business-
 router.register("categories", CategoryViewSet, basename="category")
 router.register("products", ProductViewSet, basename="product")
 router.register("customers", CustomerViewSet, basename="customer")
+router.register("credit-customers", CreditCustomerViewSet, basename="credit-customer")
+router.register("credit-payments", CreditPaymentViewSet, basename="credit-payment")
 router.register("bills", BillViewSet, basename="bill")
 
 urlpatterns = [

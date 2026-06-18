@@ -37,6 +37,8 @@ from .models import (
     BusinessProfile,
     BusinessSubscription,
     Category,
+    CreditCustomer,
+    CreditPayment,
     Customer,
     LoginOTP,
     Product,
@@ -49,6 +51,8 @@ from .serializers import (
     BusinessSubscriptionSerializer,
     BusinessProfileSerializer,
     CategorySerializer,
+    CreditCustomerSerializer,
+    CreditPaymentSerializer,
     CustomerSerializer,
     FirebaseLoginSerializer,
     OTPRequestSerializer,
@@ -230,6 +234,14 @@ def build_bill_pdf_lines(bill):
             ],
         )
 
+    if bill.payment_mode == "Credit" and bill.credit_customer:
+        lines.extend(
+            [
+                f"Credit: {bill.credit_customer.name}",
+                f"Phone: {bill.credit_customer.phone}" if bill.credit_customer.phone else "",
+            ],
+        )
+
     for item in bill.items.all():
         line_total = Decimal(item.price) * Decimal(item.quantity)
         lines.append(str(item.name)[:32])
@@ -250,6 +262,10 @@ def build_bill_pdf_lines(bill):
             receipt_pair("Discount", money(bill.discount)),
             receipt_pair("Tax", money(bill.tax)),
             receipt_pair("TOTAL", money(bill.grand_total)),
+            receipt_pair("Paid", money(bill.paid_amount)) if bill.payment_mode == "Credit" else "",
+            receipt_pair("Previous", money(bill.previous_balance)) if bill.payment_mode == "Credit" else "",
+            receipt_pair("Remaining", money(bill.remaining_amount)) if bill.payment_mode == "Credit" else "",
+            receipt_pair("Balance", money(bill.total_balance)) if bill.payment_mode == "Credit" else "",
             "-" * 32,
             receipt_center("Thank you"),
         ],
@@ -1020,6 +1036,52 @@ class CustomerViewSet(viewsets.ModelViewSet):
         serializer.save(business=require_request_business(self.request))
 
 
+class CreditCustomerViewSet(viewsets.ModelViewSet):
+    serializer_class = CreditCustomerSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+    search_fields = ("name", "phone")
+
+    def get_queryset(self):
+        business = get_request_business(self.request)
+        if not business:
+            return CreditCustomer.objects.none()
+
+        queryset = CreditCustomer.objects.filter(business=business)
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(phone__icontains=search),
+            )
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(business=require_request_business(self.request))
+
+    def perform_update(self, serializer):
+        serializer.save(business=require_request_business(self.request))
+
+
+class CreditPaymentViewSet(viewsets.ModelViewSet):
+    serializer_class = CreditPaymentSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get_queryset(self):
+        business = get_request_business(self.request)
+        if not business:
+            return CreditPayment.objects.none()
+
+        queryset = CreditPayment.objects.select_related("customer", "bill").filter(
+            business=business,
+        )
+        customer_id = self.request.query_params.get("customer")
+        if customer_id:
+            queryset = queryset.filter(customer_id=customer_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(business=require_request_business(self.request))
+
+
 class BillViewSet(viewsets.ModelViewSet):
     serializer_class = BillSerializer
     permission_classes = (permissions.IsAuthenticated,)
@@ -1029,9 +1091,16 @@ class BillViewSet(viewsets.ModelViewSet):
         business = get_request_business(self.request)
         if not business:
             return Bill.objects.none()
-        return Bill.objects.prefetch_related("items").select_related("customer").filter(
+        queryset = Bill.objects.prefetch_related("items").select_related(
+            "customer",
+            "credit_customer",
+        ).filter(
             business=business,
         )
+        payment_mode = self.request.query_params.get("payment_mode", "").strip()
+        if payment_mode:
+            queryset = queryset.filter(payment_mode=payment_mode)
+        return queryset
 
     def perform_create(self, serializer):
         serializer.save(business=require_request_business(self.request))
@@ -1692,7 +1761,11 @@ def bill_pdf(request, bill_id):
         return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
 
     bill = get_object_or_404(
-        Bill.objects.prefetch_related("items").select_related("business", "customer"),
+        Bill.objects.prefetch_related("items").select_related(
+            "business",
+            "customer",
+            "credit_customer",
+        ),
         id=bill_id,
         business=business,
     )

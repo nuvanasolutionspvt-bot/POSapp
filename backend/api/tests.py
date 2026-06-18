@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -7,8 +8,8 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from .models import BusinessProfile, BusinessSubscription, SubscriptionPlan, UserProfile
-from .serializers import BillItemSerializer
+from .models import BusinessProfile, BusinessSubscription, CreditCustomer, SubscriptionPlan, UserProfile
+from .serializers import BillItemSerializer, BillSerializer, CreditPaymentSerializer
 
 
 class BillItemSerializerTests(TestCase):
@@ -48,6 +49,80 @@ class BillItemSerializerTests(TestCase):
             serializer.validated_data["image_url"],
             "http://192.168.1.12:8000/media/products/1000498526_1tdezC2.jpg",
         )
+
+    def test_fractional_quantity_is_valid_for_weighted_items(self):
+        serializer = BillItemSerializer(
+            data={
+                "name": "Rice",
+                "price": "80.00",
+                "quantity": "1.250",
+                "image": "",
+            },
+            context={"request": self.request},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["quantity"], Decimal("1.250"))
+
+
+class CreditBillingSerializerTests(TestCase):
+    def setUp(self):
+        self.business = BusinessProfile.objects.create(
+            name="Kirana Store",
+            business_type="Kirana shop",
+        )
+        self.credit_customer = CreditCustomer.objects.create(
+            business=self.business,
+            name="Ramesh",
+            phone="9876543210",
+            current_balance=Decimal("500.00"),
+        )
+
+    def test_credit_bill_updates_customer_balance(self):
+        serializer = BillSerializer(
+            data={
+                "invoiceId": "INV-CREDIT-1",
+                "items": [
+                    {
+                        "name": "Rice",
+                        "price": "80.00",
+                        "quantity": "2.000",
+                        "image": "",
+                    },
+                ],
+                "paymentMode": "Credit",
+                "subtotal": "160.00",
+                "discount": "0.00",
+                "tax": "0.00",
+                "grandTotal": "160.00",
+                "creditCustomer": self.credit_customer.id,
+                "paidAmount": "60.00",
+            },
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        bill = serializer.save(business=self.business)
+        self.credit_customer.refresh_from_db()
+
+        self.assertEqual(bill.remaining_amount, Decimal("100.00"))
+        self.assertEqual(bill.previous_balance, Decimal("500.00"))
+        self.assertEqual(bill.total_balance, Decimal("600.00"))
+        self.assertEqual(self.credit_customer.current_balance, Decimal("600.00"))
+
+    def test_credit_payment_reduces_customer_balance(self):
+        serializer = CreditPaymentSerializer(
+            data={
+                "customer": self.credit_customer.id,
+                "amount": "125.00",
+                "note": "Partial payment",
+            },
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save(business=self.business)
+        self.credit_customer.refresh_from_db()
+
+        self.assertEqual(self.credit_customer.current_balance, Decimal("375.00"))
 
 
 class RegisterViewTests(APITestCase):
