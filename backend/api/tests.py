@@ -208,6 +208,96 @@ class CreditPaymentViewSetTests(APITestCase):
         self.assertEqual(response.data["remainingBalance"], "375.00")
         self.assertEqual(self.credit_customer.current_balance, Decimal("375.00"))
 
+    def test_customer_payment_settles_pending_credit_bill(self):
+        bill = Bill.objects.create(
+            business=self.business,
+            invoice_id="INV-PAY-1",
+            payment_mode="Credit",
+            credit_customer=self.credit_customer,
+            subtotal=Decimal("2450.00"),
+            grand_total=Decimal("2450.00"),
+            paid_amount=Decimal("0.00"),
+            remaining_amount=Decimal("2450.00"),
+            previous_balance=Decimal("0.00"),
+            total_balance=Decimal("2450.00"),
+            is_paid=False,
+        )
+        self.credit_customer.current_balance = Decimal("2450.00")
+        self.credit_customer.save(update_fields=("current_balance", "updated_at"))
+
+        response = self.client.post(
+            "/api/credit-payments/",
+            {
+                "customer": self.credit_customer.id,
+                "amount": "2450.00",
+                "paymentMode": "Cash",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.credit_customer.refresh_from_db()
+        bill.refresh_from_db()
+
+        self.assertEqual(self.credit_customer.current_balance, Decimal("0.00"))
+        self.assertEqual(bill.paid_amount, Decimal("2450.00"))
+        self.assertEqual(bill.remaining_amount, Decimal("0.00"))
+        self.assertEqual(bill.total_balance, Decimal("0.00"))
+        self.assertTrue(bill.is_paid)
+        self.assertEqual(response.data["bill"], bill.id)
+
+        bill_response = self.client.get(f"/api/bills/{bill.id}/")
+        self.assertEqual(bill_response.status_code, 200, bill_response.data)
+        self.assertEqual(bill_response.data["remainingAmount"], "0.00")
+        self.assertTrue(bill_response.data["isPaid"])
+
+    def test_modifying_customer_payment_recalculates_settled_bill(self):
+        bill = Bill.objects.create(
+            business=self.business,
+            invoice_id="INV-PAY-2",
+            payment_mode="Credit",
+            credit_customer=self.credit_customer,
+            subtotal=Decimal("2450.00"),
+            grand_total=Decimal("2450.00"),
+            paid_amount=Decimal("0.00"),
+            remaining_amount=Decimal("2450.00"),
+            previous_balance=Decimal("0.00"),
+            total_balance=Decimal("2450.00"),
+            is_paid=False,
+        )
+        self.credit_customer.current_balance = Decimal("2450.00")
+        self.credit_customer.save(update_fields=("current_balance", "updated_at"))
+
+        create_response = self.client.post(
+            "/api/credit-payments/",
+            {
+                "customer": self.credit_customer.id,
+                "amount": "1000.00",
+                "paymentMode": "Cash",
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+
+        update_response = self.client.patch(
+            f"/api/credit-payments/{create_response.data['id']}/",
+            {
+                "amount": "1500.00",
+                "paymentMode": "UPI",
+            },
+            format="json",
+        )
+
+        self.assertEqual(update_response.status_code, 200, update_response.data)
+        self.credit_customer.refresh_from_db()
+        bill.refresh_from_db()
+
+        self.assertEqual(self.credit_customer.current_balance, Decimal("950.00"))
+        self.assertEqual(bill.paid_amount, Decimal("1500.00"))
+        self.assertEqual(bill.remaining_amount, Decimal("950.00"))
+        self.assertEqual(bill.total_balance, Decimal("950.00"))
+        self.assertFalse(bill.is_paid)
+
     def test_update_credit_payment_recalculates_customer_balance(self):
         payment = CreditPayment.objects.create(
             business=self.business,

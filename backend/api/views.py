@@ -1217,6 +1217,7 @@ class CreditPaymentViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Select a payment from your business.")
 
         customer = instance.customer
+        self.get_serializer().reverse_payment_allocations(instance)
         customer.current_balance = Decimal(customer.current_balance or 0) + Decimal(instance.amount or 0)
         customer.save(update_fields=("current_balance", "updated_at"))
         instance.delete()

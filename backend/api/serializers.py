@@ -12,6 +12,7 @@ from .models import (
     Category,
     CreditCustomer,
     CreditPayment,
+    CreditPaymentAllocation,
     Customer,
     Product,
     SubscriptionPlan,
@@ -518,6 +519,82 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
                 {"amount": "Payment amount cannot be greater than customer balance."},
             )
 
+    def get_pending_bills(self, business, customer, bill=None):
+        queryset = (
+            Bill.objects.select_for_update()
+            .filter(
+                business=business,
+                credit_customer=customer,
+                payment_mode="Credit",
+                remaining_amount__gt=0,
+            )
+            .order_by("created_at", "id")
+        )
+
+        if bill:
+            queryset = queryset.filter(id=bill.id)
+
+        return queryset
+
+    def refresh_bill_credit_totals(self, bill):
+        bill.remaining_amount = max(
+            Decimal("0.00"),
+            Decimal(bill.grand_total or 0) - Decimal(bill.paid_amount or 0),
+        )
+        bill.total_balance = Decimal(bill.previous_balance or 0) + Decimal(bill.remaining_amount or 0)
+        bill.is_paid = bill.remaining_amount <= 0
+        bill.save(
+            update_fields=(
+                "paid_amount",
+                "remaining_amount",
+                "total_balance",
+                "is_paid",
+                "updated_at",
+            ),
+        )
+
+    def apply_payment_to_bills(self, payment, bill=None):
+        remaining_payment = Decimal(payment.amount or 0)
+        first_bill = None
+
+        for pending_bill in self.get_pending_bills(payment.business, payment.customer, bill):
+            if remaining_payment <= 0:
+                break
+
+            allocation_amount = min(remaining_payment, Decimal(pending_bill.remaining_amount or 0))
+            if allocation_amount <= 0:
+                continue
+
+            pending_bill.paid_amount = Decimal(pending_bill.paid_amount or 0) + allocation_amount
+            self.refresh_bill_credit_totals(pending_bill)
+            CreditPaymentAllocation.objects.create(
+                payment=payment,
+                bill=pending_bill,
+                amount=allocation_amount,
+            )
+
+            if first_bill is None:
+                first_bill = pending_bill
+
+            remaining_payment -= allocation_amount
+
+        if first_bill and payment.bill_id != first_bill.id:
+            payment.bill = first_bill
+            payment.save(update_fields=("bill", "updated_at"))
+
+    def reverse_payment_allocations(self, payment):
+        allocations = list(payment.allocations.select_related("bill").all())
+
+        for allocation in allocations:
+            bill = allocation.bill
+            bill.paid_amount = max(
+                Decimal("0.00"),
+                Decimal(bill.paid_amount or 0) - Decimal(allocation.amount or 0),
+            )
+            self.refresh_bill_credit_totals(bill)
+
+        payment.allocations.all().delete()
+
     def validate_customer(self, value):
         request = self.context.get("request")
         business = getattr(getattr(request, "user", None), "profile", None)
@@ -585,6 +662,7 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
             payment.receipt_id = f"PAY-{payment.id:04d}"
             payment.save(update_fields=("receipt_id", "updated_at"))
 
+        self.apply_payment_to_bills(payment, bill)
         customer.current_balance = remaining_balance
         customer.save(update_fields=("current_balance", "updated_at"))
         return payment
@@ -593,6 +671,7 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         business = validated_data.pop("business", instance.business)
         old_customer = instance.customer
+        self.reverse_payment_allocations(instance)
         restored_old_balance = Decimal(old_customer.current_balance or 0) + Decimal(instance.amount or 0)
         old_customer.current_balance = restored_old_balance
         old_customer.save(update_fields=("current_balance", "updated_at"))
@@ -617,6 +696,7 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
         instance.remaining_balance = remaining_balance
         instance.save()
 
+        self.apply_payment_to_bills(instance, bill)
         customer.current_balance = remaining_balance
         customer.save(update_fields=("current_balance", "updated_at"))
 

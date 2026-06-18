@@ -445,6 +445,26 @@ class CreditPayment(TimeStampedModel):
         return f"{self.customer} paid {self.amount}"
 
 
+class CreditPaymentAllocation(TimeStampedModel):
+    payment = models.ForeignKey(
+        CreditPayment,
+        on_delete=models.CASCADE,
+        related_name="allocations",
+    )
+    bill = models.ForeignKey(
+        Bill,
+        on_delete=models.CASCADE,
+        related_name="credit_payment_allocations",
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def __str__(self):
+        return f"{self.payment} -> {self.bill} ({self.amount})"
+
+
 class BillItem(TimeStampedModel):
     bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name="items")
     product = models.ForeignKey(
