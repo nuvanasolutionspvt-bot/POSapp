@@ -434,6 +434,7 @@ class ReportsDownloadTests(APITestCase):
         credit_customer = CreditCustomer.objects.create(
             business=self.business,
             name="Credit Buyer",
+            phone="9998887776",
             current_balance=Decimal("50.00"),
         )
         cash_bill = Bill.objects.create(
@@ -477,9 +478,13 @@ class ReportsDownloadTests(APITestCase):
         self.assertIn("Total Amount", content)
         self.assertIn("Paid Amount", content)
         self.assertIn("Remaining Amount", content)
+        self.assertIn("Customer Name", content)
+        self.assertIn("Phone", content)
         self.assertIn("INV-CASH", content)
         self.assertIn("Sugar", content)
         self.assertIn("INV-CREDIT", content)
+        self.assertIn("Credit Buyer", content)
+        self.assertIn("9998887776", content)
         self.assertIn("Rice", content)
         self.assertIn("Total bills", content)
         self.assertIn("Total amount", content)

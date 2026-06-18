@@ -207,7 +207,7 @@ def build_pdf_document(page_contents, page_width=842, page_height=595):
 
 def pdf_text(x, y, text, size=9, bold=False):
     font = "F2" if bold else "F1"
-    return f"BT /{font} {size} Tf {x:.2f} {y:.2f} Td ({pdf_escape(text)}) Tj ET"
+    return f"0 g BT /{font} {size} Tf {x:.2f} {y:.2f} Td ({pdf_escape(text)}) Tj ET"
 
 
 def pdf_line(x1, y1, x2, y2, width=0.6):
@@ -2171,10 +2171,14 @@ def reports_download(request):
 
     period = normalize_report_period(request)
     start_day, end_day, start_at, end_at, label = get_report_period_range(period)
-    bills = Bill.objects.prefetch_related("items").filter(
-        business=business,
-        created_at__gte=start_at,
-        created_at__lt=end_at,
+    bills = (
+        Bill.objects.select_related("credit_customer")
+        .prefetch_related("items")
+        .filter(
+            business=business,
+            created_at__gte=start_at,
+            created_at__lt=end_at,
+        )
     )
     total_sales = bills.aggregate(total=Sum("grand_total"))["total"] or 0
     paid_total = bills.aggregate(total=Sum("paid_amount"))["total"] or 0
@@ -2198,6 +2202,8 @@ def reports_download(request):
         credit_rows.append(
             {
                 "invoice": bill.invoice_id,
+                "customer_name": bill.credit_customer.name if bill.credit_customer else "",
+                "customer_phone": bill.credit_customer.phone if bill.credit_customer else "",
                 "item": report_bill_items(bill),
                 "date": timezone.localtime(bill.created_at).strftime("%d %b %Y"),
                 "total": money(bill.grand_total),
@@ -2221,11 +2227,13 @@ def reports_download(request):
         {
             "title": "Credit Bills",
             "columns": (
-                ("Invoice No", 110, "invoice"),
-                ("Item", 260, "item"),
-                ("Date", 100, "date"),
-                ("Total Amount", 100, "total", "right"),
-                ("Paid Amount", 95, "paid", "right"),
+                ("Invoice No", 75, "invoice"),
+                ("Customer Name", 105, "customer_name"),
+                ("Phone", 75, "customer_phone"),
+                ("Item", 155, "item"),
+                ("Date", 70, "date"),
+                ("Total Amount", 85, "total", "right"),
+                ("Paid Amount", 80, "paid", "right"),
                 ("Remaining Amount", 95, "remaining", "right"),
             ),
             "rows": credit_rows,
