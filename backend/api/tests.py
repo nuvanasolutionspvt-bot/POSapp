@@ -677,6 +677,8 @@ class SubscriptionAdminBusinessTests(TestCase):
         self.assertContains(response, "registered-owner")
         self.assertContains(response, "27ABCDE1234F1Z5")
         self.assertContains(response, "Not assigned")
+        self.assertContains(response, "Expire Date")
+        self.assertContains(response, "Edit")
 
     def test_businesses_page_requires_owner_session(self):
         self.client.session.flush()
@@ -700,6 +702,62 @@ class SubscriptionAdminBusinessTests(TestCase):
 
         self.assertContains(response, "Alpha Store")
         self.assertNotContains(response, "Beta Store")
+
+    def test_businesses_page_can_edit_subscription_expiry_dates(self):
+        plan, _ = SubscriptionPlan.objects.get_or_create(
+            code="free_trial_7_days",
+            defaults={
+                "name": "Free Trial",
+                "price": Decimal("0.00"),
+                "billing_cycle": "monthly",
+            },
+        )
+        business = BusinessProfile.objects.create(
+            name="Friend Store",
+            phone="9000000003",
+        )
+        today = timezone.localdate()
+        subscription = BusinessSubscription.objects.create(
+            business=business,
+            plan=plan,
+            status="trial",
+            starts_at=today,
+            ends_at=today + timedelta(days=7),
+            trial_ends_at=today + timedelta(days=7),
+            seats=1,
+        )
+
+        response = self.client.get(reverse("subscription-admin-businesses"))
+
+        self.assertContains(response, "Friend Store")
+        self.assertContains(response, f'value="{subscription.ends_at:%Y-%m-%d}"')
+
+        extended_end = today + timedelta(days=45)
+        response = self.client.post(
+            reverse("business-subscription-save"),
+            {
+                "redirect_to": "businesses",
+                "subscription_id": str(subscription.id),
+                "business": str(business.id),
+                "plan": str(plan.id),
+                "status": "trial",
+                "starts_at": f"{today:%Y-%m-%d}",
+                "ends_at": f"{extended_end:%Y-%m-%d}",
+                "trial_ends_at": f"{extended_end:%Y-%m-%d}",
+                "seats": "1",
+                "notes": "Extended for friend trial.",
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("subscription-admin-businesses"),
+            fetch_redirect_response=False,
+        )
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.ends_at, extended_end)
+        self.assertEqual(subscription.trial_ends_at, extended_end)
+        self.assertEqual(subscription.notes, "Extended for friend trial.")
 
 
 class LegalAndAccountTests(APITestCase):

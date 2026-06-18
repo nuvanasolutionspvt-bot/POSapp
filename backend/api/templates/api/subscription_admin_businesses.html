@@ -249,6 +249,67 @@
       white-space: nowrap;
     }
 
+    .expiry-date {
+      color: var(--primary);
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .days-ok { color: var(--success); font-weight: 800; }
+    .days-negative { color: var(--danger); font-weight: 800; }
+
+    .edit-details { min-width: 230px; }
+    .edit-details summary {
+      display: inline-block;
+      border-radius: 10px;
+      padding: 9px 13px;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 900;
+      cursor: pointer;
+      list-style: none;
+    }
+    .edit-details summary::-webkit-details-marker { display: none; }
+    .edit-details[open] summary { margin-bottom: 12px; }
+
+    .edit-form {
+      display: grid;
+      gap: 9px;
+      min-width: 230px;
+    }
+    .edit-form label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .edit-form input,
+    .edit-form select,
+    .edit-form textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 9px;
+      color: var(--text);
+      font: inherit;
+      text-transform: none;
+    }
+    .edit-form textarea {
+      min-height: 62px;
+      resize: vertical;
+    }
+    .edit-form button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: var(--success);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 900;
+    }
+
     .empty {
       padding: 32px;
       color: var(--muted);
@@ -339,6 +400,8 @@
                   <th>Subscription</th>
                   <th>App Data</th>
                   <th>Registered</th>
+                  <th>Expire Date</th>
+                  <th>Edit</th>
                 </tr>
               </thead>
               <tbody>
@@ -389,6 +452,69 @@
                     <td>
                       <strong>{{ business.created_at|date:"d M Y" }}</strong>
                       <div class="detail-line">{{ business.created_at|date:"h:i A" }}</div>
+                    </td>
+                    <td>
+                      {% if business.subscription %}
+                        <div class="expiry-date">{{ business.subscription.ends_at|date:"d M Y" }}</div>
+                        {% if business.subscription.days_remaining < 0 %}
+                          <div class="detail-line days-negative">{{ business.subscription.days_remaining }} days</div>
+                        {% else %}
+                          <div class="detail-line days-ok">{{ business.subscription.days_remaining }} days left</div>
+                        {% endif %}
+                        {% if business.subscription.trial_ends_at %}
+                          <div class="detail-line">Trial: {{ business.subscription.trial_ends_at|date:"d M Y" }}</div>
+                        {% endif %}
+                      {% else %}
+                        <span class="status none">No expiry</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if plans %}
+                        <details class="edit-details">
+                          <summary>Edit</summary>
+                          <form class="edit-form" method="post" action="{% url 'business-subscription-save' %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="redirect_to" value="businesses">
+                            <input type="hidden" name="business" value="{{ business.id }}">
+                            {% if business.subscription %}
+                              <input type="hidden" name="subscription_id" value="{{ business.subscription.id }}">
+                            {% endif %}
+
+                            <label>Plan
+                              <select name="plan" required>
+                                {% for plan in plans %}
+                                  <option value="{{ plan.id }}" {% if business.subscription and plan.id == business.subscription.plan.id %}selected{% endif %}>{{ plan.name }}</option>
+                                {% endfor %}
+                              </select>
+                            </label>
+                            <label>Status
+                              <select name="status" required>
+                                {% for value,label in statuses %}
+                                  <option value="{{ value }}" {% if business.subscription and value == business.subscription.status %}selected{% elif not business.subscription and value == "trial" %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                              </select>
+                            </label>
+                            <label>Starts
+                              <input name="starts_at" type="date" value="{% if business.subscription %}{{ business.subscription.starts_at|date:'Y-m-d' }}{% else %}{{ today|date:'Y-m-d' }}{% endif %}" required>
+                            </label>
+                            <label>Ends
+                              <input name="ends_at" type="date" value="{% if business.subscription %}{{ business.subscription.ends_at|date:'Y-m-d' }}{% else %}{{ today|date:'Y-m-d' }}{% endif %}" required>
+                            </label>
+                            <label>Trial ends
+                              <input name="trial_ends_at" type="date" value="{% if business.subscription.trial_ends_at %}{{ business.subscription.trial_ends_at|date:'Y-m-d' }}{% endif %}">
+                            </label>
+                            <label>Seats
+                              <input name="seats" type="number" min="1" value="{% if business.subscription %}{{ business.subscription.seats }}{% else %}1{% endif %}" required>
+                            </label>
+                            <label>Notes
+                              <textarea name="notes">{% if business.subscription %}{{ business.subscription.notes }}{% endif %}</textarea>
+                            </label>
+                            <button type="submit">Save dates</button>
+                          </form>
+                        </details>
+                      {% else %}
+                        <span class="status none">Create plan first</span>
+                      {% endif %}
                     </td>
                   </tr>
                 {% endfor %}

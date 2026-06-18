@@ -1535,6 +1535,7 @@ def subscription_admin_businesses(request):
     today = timezone.localdate()
     all_businesses = BusinessProfile.objects.all()
     subscriptions = BusinessSubscription.objects.all()
+    plans = SubscriptionPlan.objects.all()
     metrics = {
         "total": all_businesses.count(),
         "with_subscription": subscriptions.count(),
@@ -1551,7 +1552,9 @@ def subscription_admin_businesses(request):
         {
             "businesses": businesses,
             "metrics": metrics,
+            "plans": plans,
             "search_query": search_query,
+            "statuses": BusinessSubscription.STATUSES,
             "today": today,
         },
     )
@@ -1607,6 +1610,9 @@ def business_subscription_save(request):
             business=business,
             defaults={key: value for key, value in values.items() if key != "business"},
         )
+
+    if request.POST.get("redirect_to") == "businesses":
+        return redirect("subscription-admin-businesses")
 
     return redirect("subscription-admin-panel")
 
