@@ -78,6 +78,35 @@ class CreditBillingSerializerTests(TestCase):
             current_balance=Decimal("500.00"),
         )
 
+    def test_non_credit_bills_accept_modified_decimal_quantities(self):
+        for payment_mode in ("Cash", "UPI", "Card"):
+            with self.subTest(payment_mode=payment_mode):
+                serializer = BillSerializer(
+                    data={
+                        "invoiceId": f"INV-{payment_mode}",
+                        "items": [
+                            {
+                                "name": "Rice",
+                                "price": "80.00",
+                                "quantity": "1.500",
+                                "image": "",
+                            },
+                        ],
+                        "paymentMode": payment_mode,
+                        "subtotal": "120.00",
+                        "discount": "0.00",
+                        "tax": "0.00",
+                        "grandTotal": "120.00",
+                    },
+                )
+
+                self.assertTrue(serializer.is_valid(), serializer.errors)
+                bill = serializer.save(business=self.business)
+                item = bill.items.get()
+
+                self.assertEqual(bill.payment_mode, payment_mode)
+                self.assertEqual(item.quantity, Decimal("1.500"))
+
     def test_credit_bill_updates_customer_balance(self):
         serializer = BillSerializer(
             data={

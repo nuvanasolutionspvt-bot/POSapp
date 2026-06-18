@@ -503,6 +503,11 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
 
 class BillItemSerializer(serializers.ModelSerializer):
     image = serializers.CharField(source="image_url", required=False, allow_blank=True)
+    quantity = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        min_value=Decimal("0.001"),
+    )
     line_total = serializers.DecimalField(
         max_digits=10,
         decimal_places=2,
