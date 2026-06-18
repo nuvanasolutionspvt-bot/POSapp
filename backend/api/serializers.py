@@ -98,6 +98,7 @@ PLAN_CODE_ALIASES = {
     "freetrial7days": "free_trial_7_days",
     "monthly": "monthly_499",
     "monthly499": "monthly_499",
+    "monthly299": "monthly_499",
     "1month": "monthly_499",
     "1monthplan": "monthly_499",
     "yearly": "yearly_4999_machine",
@@ -446,6 +447,24 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
     business = serializers.PrimaryKeyRelatedField(read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     customer_phone = serializers.CharField(source="customer.phone", read_only=True)
+    receiptId = serializers.CharField(source="receipt_id", read_only=True)
+    paymentMode = serializers.ChoiceField(
+        source="payment_mode",
+        choices=CreditPayment.PAYMENT_MODES,
+        required=False,
+    )
+    previousBalance = serializers.DecimalField(
+        source="previous_balance",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
+    remainingBalance = serializers.DecimalField(
+        source="remaining_balance",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
 
     class Meta:
         model = CreditPayment
@@ -456,12 +475,48 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
             "customer_name",
             "customer_phone",
             "bill",
+            "receiptId",
+            "paymentMode",
             "amount",
+            "previousBalance",
+            "remainingBalance",
             "note",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("created_at", "updated_at")
+        read_only_fields = (
+            "receiptId",
+            "previousBalance",
+            "remainingBalance",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_business_scope(self, business, customer, bill=None):
+        if business.business_type != "Kirana shop":
+            raise serializers.ValidationError(
+                {"detail": "Credit payments are available only for Kirana shop businesses."},
+            )
+
+        if customer.business_id != business.id:
+            raise serializers.ValidationError({"customer": "Select a customer from your business."})
+
+        if bill and bill.business_id != business.id:
+            raise serializers.ValidationError({"bill": "Select a bill from your business."})
+
+        if bill and bill.credit_customer_id and bill.credit_customer_id != customer.id:
+            raise serializers.ValidationError(
+                {"bill": "Select a credit bill for this customer."},
+            )
+
+    def get_available_balance(self, customer, amount_to_restore=Decimal("0.00")):
+        return Decimal(customer.current_balance or 0) + Decimal(amount_to_restore or 0)
+
+    def validate_payment_amount(self, amount, available_balance):
+        if Decimal(amount or 0) > available_balance:
+            raise serializers.ValidationError(
+                {"amount": "Payment amount cannot be greater than customer balance."},
+            )
 
     def validate_customer(self, value):
         request = self.context.get("request")
@@ -483,6 +538,26 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
 
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        customer = attrs.get("customer", getattr(self.instance, "customer", None))
+        bill = attrs.get("bill", getattr(self.instance, "bill", None))
+        amount = attrs.get("amount", getattr(self.instance, "amount", Decimal("0.00")))
+
+        if customer:
+            amount_to_restore = (
+                Decimal(self.instance.amount or 0)
+                if self.instance and self.instance.customer_id == customer.id
+                else Decimal("0.00")
+            )
+            available_balance = self.get_available_balance(customer, amount_to_restore)
+            self.validate_payment_amount(amount, available_balance)
+
+        if bill and customer and bill.credit_customer_id and bill.credit_customer_id != customer.id:
+            raise serializers.ValidationError({"bill": "Select a credit bill for this customer."})
+
+        return attrs
+
     def validate_amount(self, value):
         if value <= 0:
             raise serializers.ValidationError("Payment amount must be greater than zero.")
@@ -491,14 +566,61 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        payment = CreditPayment.objects.create(**validated_data)
-        customer = payment.customer
-        customer.current_balance = max(
-            Decimal("0.00"),
-            Decimal(customer.current_balance) - Decimal(payment.amount),
+        business = validated_data["business"]
+        customer = validated_data["customer"]
+        bill = validated_data.get("bill")
+        amount = Decimal(validated_data["amount"])
+        self.validate_business_scope(business, customer, bill)
+
+        previous_balance = Decimal(customer.current_balance or 0)
+        self.validate_payment_amount(amount, previous_balance)
+        remaining_balance = max(Decimal("0.00"), previous_balance - amount)
+
+        payment = CreditPayment.objects.create(
+            **validated_data,
+            previous_balance=previous_balance,
+            remaining_balance=remaining_balance,
         )
+        if not payment.receipt_id:
+            payment.receipt_id = f"PAY-{payment.id:04d}"
+            payment.save(update_fields=("receipt_id", "updated_at"))
+
+        customer.current_balance = remaining_balance
         customer.save(update_fields=("current_balance", "updated_at"))
         return payment
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        business = validated_data.pop("business", instance.business)
+        old_customer = instance.customer
+        restored_old_balance = Decimal(old_customer.current_balance or 0) + Decimal(instance.amount or 0)
+        old_customer.current_balance = restored_old_balance
+        old_customer.save(update_fields=("current_balance", "updated_at"))
+
+        customer = validated_data.get("customer", old_customer)
+        if customer.id == old_customer.id:
+            customer.current_balance = restored_old_balance
+
+        bill = validated_data.get("bill", instance.bill)
+        amount = Decimal(validated_data.get("amount", instance.amount))
+        self.validate_business_scope(business, customer, bill)
+
+        previous_balance = Decimal(customer.current_balance or 0)
+        self.validate_payment_amount(amount, previous_balance)
+        remaining_balance = max(Decimal("0.00"), previous_balance - amount)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.business = business
+        instance.previous_balance = previous_balance
+        instance.remaining_balance = remaining_balance
+        instance.save()
+
+        customer.current_balance = remaining_balance
+        customer.save(update_fields=("current_balance", "updated_at"))
+
+        return instance
 
 
 class BillItemSerializer(serializers.ModelSerializer):

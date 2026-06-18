@@ -8,7 +8,15 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from .models import BusinessProfile, BusinessSubscription, CreditCustomer, SubscriptionPlan, UserProfile
+from .models import (
+    Bill,
+    BusinessProfile,
+    BusinessSubscription,
+    CreditCustomer,
+    CreditPayment,
+    SubscriptionPlan,
+    UserProfile,
+)
 from .serializers import BillItemSerializer, BillSerializer, CreditPaymentSerializer
 
 
@@ -148,10 +156,172 @@ class CreditBillingSerializerTests(TestCase):
         )
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
-        serializer.save(business=self.business)
+        payment = serializer.save(business=self.business)
         self.credit_customer.refresh_from_db()
 
         self.assertEqual(self.credit_customer.current_balance, Decimal("375.00"))
+        self.assertEqual(payment.receipt_id, f"PAY-{payment.id:04d}")
+        self.assertEqual(payment.payment_mode, "Cash")
+        self.assertEqual(payment.previous_balance, Decimal("500.00"))
+        self.assertEqual(payment.remaining_balance, Decimal("375.00"))
+
+
+class CreditPaymentViewSetTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="credit-payment-user", password="Password123")
+        self.business = BusinessProfile.objects.create(
+            name="Ledger Store",
+            business_type="Kirana shop",
+            phone="9876543230",
+        )
+        UserProfile.objects.create(
+            user=self.user,
+            phone="9876543230",
+            business_profile=self.business,
+        )
+        self.credit_customer = CreditCustomer.objects.create(
+            business=self.business,
+            name="Suresh",
+            phone="9876543231",
+            current_balance=Decimal("500.00"),
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def test_create_credit_payment_stores_receipt_and_balance_snapshot(self):
+        response = self.client.post(
+            "/api/credit-payments/",
+            {
+                "customer": self.credit_customer.id,
+                "amount": "125.00",
+                "paymentMode": "UPI",
+                "note": "PhonePe",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.credit_customer.refresh_from_db()
+
+        self.assertEqual(response.data["receiptId"], f"PAY-{response.data['id']:04d}")
+        self.assertEqual(response.data["paymentMode"], "UPI")
+        self.assertEqual(response.data["previousBalance"], "500.00")
+        self.assertEqual(response.data["remainingBalance"], "375.00")
+        self.assertEqual(self.credit_customer.current_balance, Decimal("375.00"))
+
+    def test_update_credit_payment_recalculates_customer_balance(self):
+        payment = CreditPayment.objects.create(
+            business=self.business,
+            customer=self.credit_customer,
+            receipt_id="PAY-0001",
+            payment_mode="Cash",
+            amount=Decimal("100.00"),
+            previous_balance=Decimal("500.00"),
+            remaining_balance=Decimal("400.00"),
+        )
+        self.credit_customer.current_balance = Decimal("400.00")
+        self.credit_customer.save(update_fields=("current_balance", "updated_at"))
+
+        response = self.client.patch(
+            f"/api/credit-payments/{payment.id}/",
+            {
+                "amount": "150.00",
+                "paymentMode": "Card",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.credit_customer.refresh_from_db()
+        payment.refresh_from_db()
+
+        self.assertEqual(payment.payment_mode, "Card")
+        self.assertEqual(payment.previous_balance, Decimal("500.00"))
+        self.assertEqual(payment.remaining_balance, Decimal("350.00"))
+        self.assertEqual(self.credit_customer.current_balance, Decimal("350.00"))
+
+    def test_credit_customer_ledger_combines_bills_and_payments(self):
+        bill = Bill.objects.create(
+            business=self.business,
+            invoice_id="INV-LEDGER-1",
+            payment_mode="Credit",
+            credit_customer=self.credit_customer,
+            subtotal=Decimal("200.00"),
+            grand_total=Decimal("200.00"),
+            paid_amount=Decimal("50.00"),
+            remaining_amount=Decimal("150.00"),
+            previous_balance=Decimal("500.00"),
+            total_balance=Decimal("650.00"),
+        )
+        payment = CreditPayment.objects.create(
+            business=self.business,
+            customer=self.credit_customer,
+            receipt_id="PAY-LEDGER-1",
+            payment_mode="Cash",
+            amount=Decimal("100.00"),
+            previous_balance=Decimal("650.00"),
+            remaining_balance=Decimal("550.00"),
+        )
+        self.credit_customer.current_balance = Decimal("550.00")
+        self.credit_customer.save(update_fields=("current_balance", "updated_at"))
+
+        response = self.client.get(f"/api/credit-customers/{self.credit_customer.id}/ledger/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        record_types = {record["type"] for record in response.data["results"]}
+        self.assertEqual(record_types, {"bill", "payment"})
+        bill_record = next(record for record in response.data["results"] if record["type"] == "bill")
+        payment_record = next(record for record in response.data["results"] if record["type"] == "payment")
+
+        self.assertEqual(bill_record["id"], bill.id)
+        self.assertEqual(bill_record["invoiceId"], "INV-LEDGER-1")
+        self.assertEqual(bill_record["balanceAfter"], Decimal("650.00"))
+        self.assertEqual(payment_record["id"], payment.id)
+        self.assertEqual(payment_record["receiptId"], "PAY-LEDGER-1")
+        self.assertEqual(payment_record["balanceAfter"], Decimal("550.00"))
+
+
+class BillViewSetTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="bill-user", password="Password123")
+        self.business = BusinessProfile.objects.create(
+            name="API Store",
+            business_type="Kirana shop",
+            phone="9876543220",
+        )
+        UserProfile.objects.create(
+            user=self.user,
+            phone="9876543220",
+            business_profile=self.business,
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def test_create_bill_endpoint_accepts_modified_decimal_quantities(self):
+        for payment_mode in ("Cash", "UPI", "Card"):
+            with self.subTest(payment_mode=payment_mode):
+                response = self.client.post(
+                    "/api/bills/",
+                    {
+                        "invoiceId": f"API-{payment_mode}",
+                        "items": [
+                            {
+                                "name": "Rice",
+                                "price": "80.00",
+                                "quantity": "1.500",
+                                "image": "",
+                            },
+                        ],
+                        "paymentMode": payment_mode,
+                        "subtotal": "120.00",
+                        "discount": "0.00",
+                        "tax": "0.00",
+                        "grandTotal": "120.00",
+                    },
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 201, response.data)
+                self.assertEqual(response.data["paymentMode"], payment_mode)
+                self.assertEqual(response.data["items"][0]["quantity"], "1.500")
 
 
 class RegisterViewTests(APITestCase):
@@ -211,7 +381,8 @@ class RegisterViewTests(APITestCase):
         self.assertFalse(
             BusinessSubscription.objects.filter(business__phone="9876543211").exists(),
         )
-        self.assertTrue(SubscriptionPlan.objects.filter(code="monthly_499").exists())
+        monthly_plan = SubscriptionPlan.objects.get(code="monthly_499")
+        self.assertEqual(monthly_plan.price, Decimal("299.00"))
 
     def test_register_accepts_app_payload_aliases_without_password(self):
         response = self.client.post(

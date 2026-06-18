@@ -273,6 +273,31 @@ def build_bill_pdf_lines(bill):
     return [line for line in lines if line != ""]
 
 
+def build_credit_payment_pdf_lines(payment):
+    business = payment.business
+    created_at = timezone.localtime(payment.created_at)
+    lines = [
+        receipt_center(business.name),
+        receipt_center(business.address) if business.address else "",
+        receipt_center(f"Phone: {business.phone}") if business.phone else "",
+        receipt_center(f"GSTIN: {business.gstin}") if business.gstin else "",
+        "-" * 32,
+        f"Receipt: {payment.receipt_id or f'PAY-{payment.id:04d}'}",
+        f"Date: {created_at:%d %b %Y, %I:%M %p}",
+        f"Payment: {payment.payment_mode}",
+        "-" * 32,
+        f"Customer: {payment.customer.name}",
+        f"Phone: {payment.customer.phone}" if payment.customer.phone else "",
+        "-" * 32,
+        receipt_pair("Previous", money(payment.previous_balance)),
+        receipt_pair("Paid", money(payment.amount)),
+        receipt_pair("Remaining", money(payment.remaining_balance)),
+        "-" * 32,
+        receipt_center("Payment received"),
+    ]
+    return [line for line in lines if line != ""]
+
+
 def serialize_business_profile(profile, user=None, phone=""):
     if not profile:
         return None
@@ -301,6 +326,13 @@ def require_request_business(request):
     business = get_request_business(request)
     if not business:
         raise PermissionDenied("Your login is not linked to a business.")
+    return business
+
+
+def require_kirana_business(request):
+    business = require_request_business(request)
+    if business.business_type != "Kirana shop":
+        raise PermissionDenied("This feature is available only for Kirana shop businesses.")
     return business
 
 
@@ -349,7 +381,7 @@ APP_SUBSCRIPTION_PLANS = {
     "monthly_499": {
         "name": "1 Month Plan",
         "code": "monthly_499",
-        "price": Decimal("499.00"),
+        "price": Decimal("299.00"),
         "billing_cycle": "monthly",
         "max_users": 3,
         "max_products": 1000,
@@ -1043,7 +1075,7 @@ class CreditCustomerViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         business = get_request_business(self.request)
-        if not business:
+        if not business or business.business_type != "Kirana shop":
             return CreditCustomer.objects.none()
 
         queryset = CreditCustomer.objects.filter(business=business)
@@ -1055,10 +1087,105 @@ class CreditCustomerViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(business=require_request_business(self.request))
+        serializer.save(business=require_kirana_business(self.request))
 
     def perform_update(self, serializer):
-        serializer.save(business=require_request_business(self.request))
+        serializer.save(business=require_kirana_business(self.request))
+
+    @action(detail=True, methods=["get"], url_path="ledger")
+    def ledger(self, request, pk=None):
+        business = require_kirana_business(request)
+        customer = self.get_object()
+        bills = (
+            Bill.objects.prefetch_related("items")
+            .filter(
+                business=business,
+                credit_customer=customer,
+                payment_mode="Credit",
+            )
+        )
+        payments = CreditPayment.objects.select_related("bill").filter(
+            business=business,
+            customer=customer,
+        )
+        ordered_records = [
+            ("bill", bill.created_at, bill)
+            for bill in bills
+        ] + [
+            ("payment", payment.created_at, payment)
+            for payment in payments
+        ]
+        ordered_records.sort(key=lambda record: record[1])
+        records = []
+        running_balance = None
+
+        for record_type, _, source in ordered_records:
+            if record_type == "bill":
+                bill = source
+                previous_balance = Decimal(bill.previous_balance or 0)
+                balance_after = Decimal(bill.total_balance or 0)
+                balance_change = Decimal(bill.remaining_amount or 0)
+                running_balance = balance_after
+                records.append(
+                    {
+                        "type": "bill",
+                        "id": bill.id,
+                        "created_at": bill.created_at,
+                        "title": f"Bill {bill.invoice_id}",
+                        "invoiceId": bill.invoice_id,
+                        "amount": bill.grand_total,
+                        "paidAmount": bill.paid_amount,
+                        "paymentMode": bill.payment_mode,
+                        "balanceChange": balance_change,
+                        "previousBalance": previous_balance,
+                        "balanceAfter": balance_after,
+                        "itemsCount": len(bill.items.all()),
+                    },
+                )
+                continue
+
+            payment = source
+            stored_previous_balance = Decimal(payment.previous_balance or 0)
+            stored_remaining_balance = Decimal(payment.remaining_balance or 0)
+
+            if stored_previous_balance or stored_remaining_balance:
+                previous_balance = stored_previous_balance
+                balance_after = stored_remaining_balance
+            elif running_balance is not None:
+                previous_balance = running_balance
+                balance_after = max(
+                    Decimal("0.00"),
+                    previous_balance - Decimal(payment.amount or 0),
+                )
+            else:
+                previous_balance = stored_previous_balance
+                balance_after = stored_remaining_balance
+
+            running_balance = balance_after
+            records.append(
+                {
+                    "type": "payment",
+                    "id": payment.id,
+                    "created_at": payment.created_at,
+                    "title": f"Payment {payment.receipt_id or f'PAY-{payment.id:04d}'}",
+                    "receiptId": payment.receipt_id or f"PAY-{payment.id:04d}",
+                    "amount": payment.amount,
+                    "paymentMode": payment.payment_mode,
+                    "balanceChange": -Decimal(payment.amount),
+                    "previousBalance": previous_balance,
+                    "balanceAfter": balance_after,
+                    "note": payment.note,
+                },
+            )
+
+        records.sort(key=lambda record: record["created_at"], reverse=True)
+        return Response(
+            {
+                "customer": CreditCustomerSerializer(customer).data,
+                "currentBalance": customer.current_balance,
+                "results": records,
+            },
+        )
 
 
 class CreditPaymentViewSet(viewsets.ModelViewSet):
@@ -1067,7 +1194,7 @@ class CreditPaymentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         business = get_request_business(self.request)
-        if not business:
+        if not business or business.business_type != "Kirana shop":
             return CreditPayment.objects.none()
 
         queryset = CreditPayment.objects.select_related("customer", "bill").filter(
@@ -1079,7 +1206,20 @@ class CreditPaymentViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(business=require_request_business(self.request))
+        serializer.save(business=require_kirana_business(self.request))
+
+    def perform_update(self, serializer):
+        serializer.save(business=require_kirana_business(self.request))
+
+    def perform_destroy(self, instance):
+        business = require_kirana_business(self.request)
+        if instance.business_id != business.id:
+            raise PermissionDenied("Select a payment from your business.")
+
+        customer = instance.customer
+        customer.current_balance = Decimal(customer.current_balance or 0) + Decimal(instance.amount or 0)
+        customer.save(update_fields=("current_balance", "updated_at"))
+        instance.delete()
 
 
 class BillViewSet(viewsets.ModelViewSet):
@@ -1771,6 +1911,33 @@ def bill_pdf(request, bill_id):
     )
     filename = f"bill-{bill.invoice_id}.pdf"
     response = HttpResponse(build_receipt_pdf(build_bill_pdf_lines(bill)), content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def credit_payment_pdf(request, payment_id):
+    business = get_pdf_request_business(request)
+    if not business:
+        return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if business.business_type != "Kirana shop":
+        return Response(
+            {"detail": "This feature is available only for Kirana shop businesses."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    payment = get_object_or_404(
+        CreditPayment.objects.select_related("business", "customer", "bill"),
+        id=payment_id,
+        business=business,
+    )
+    filename = f"payment-{payment.receipt_id or f'PAY-{payment.id:04d}'}.pdf"
+    response = HttpResponse(
+        build_receipt_pdf(build_credit_payment_pdf_lines(payment)),
+        content_type="application/pdf",
+    )
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 

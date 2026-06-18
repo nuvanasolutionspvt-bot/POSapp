@@ -408,6 +408,12 @@ class Bill(TimeStampedModel):
 
 
 class CreditPayment(TimeStampedModel):
+    PAYMENT_MODES = (
+        ("Cash", "Cash"),
+        ("UPI", "UPI"),
+        ("Card", "Card"),
+    )
+
     business = models.ForeignKey(
         BusinessProfile,
         on_delete=models.CASCADE,
@@ -425,7 +431,11 @@ class CreditPayment(TimeStampedModel):
         blank=True,
         related_name="credit_payments",
     )
+    receipt_id = models.CharField(max_length=30, blank=True)
+    payment_mode = models.CharField(max_length=20, choices=PAYMENT_MODES, default="Cash")
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    previous_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    remaining_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     note = models.TextField(blank=True)
 
     class Meta:
